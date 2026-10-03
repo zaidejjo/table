@@ -1,0 +1,193 @@
+// v03_test.zz — header alignment, border toggles, row offset, caption.
+import table
+
+@test
+func test_header_align_center() {
+    t := table.new(["I", "N"])
+    t = table.add_row(t, ["1", "alice"])
+    t = table.add_row(t, ["22", "bob"])
+    t = table.set_header_align(t, "center")
+    got := table.render(t)
+    want := "╭────┬───────╮\n│ I  │   N   │\n├────┼───────┤\n│  1 │ alice │\n│ 22 │ bob   │\n╰────┴───────╯\n"
+    assert_eq(got, want)
+}
+
+@test
+func test_header_follows_column_by_default() {
+    t := table.new(["AB"])
+    t = table.add_row(t, ["123"])
+    t = table.set_align_all(t, "right")
+    // Header follows the column: right-aligned.
+    assert(table.render(t).contains("│  AB │"))
+    t = table.set_header_align(t, "left")
+    assert(table.render(t).contains("│ AB  │"))
+}
+
+@test
+func test_header_bad_mode_falls_back() {
+    t := table.new(["AB"])
+    t = table.add_row(t, ["123"])
+    t = table.set_header_align(t, "sideways")
+    assert(table.render(t).contains("│ AB  │"))
+}
+
+@test
+func test_outer_border_off() {
+    t := table.new(["A"])
+    t = table.add_row(t, ["1"])
+    t = table.set_outer_border(t, false)
+    assert_eq(table.render(t), " A \n───\n 1 \n")
+}
+
+@test
+func test_header_line_off() {
+    t := table.new(["A"])
+    t = table.add_row(t, ["1"])
+    t = table.set_header_line(t, false)
+    assert_eq(table.render(t), "╭───╮\n│ A │\n│ 1 │\n╰───╯\n")
+}
+
+@test
+func test_borders_all_off() {
+    t := table.new(["A"])
+    t = table.add_row(t, ["1"])
+    t = table.set_outer_border(t, false)
+    t = table.set_header_line(t, false)
+    assert_eq(table.render(t), " A \n 1 \n")
+}
+
+@test
+func test_markdown_borderless() {
+    t := table.new(["A"])
+    t = table.add_row(t, ["x"])
+    t = table.set_outer_border(t, false)
+    t = table.set_style(t, "markdown")
+    got := table.render(t)
+    assert(got.contains("---"))
+    assert(got.contains("A"))
+    assert(got.contains("x"))
+    assert_eq(got.contains("|"), false)
+}
+
+@test
+func test_markdown_no_header_line() {
+    t := table.new(["A"])
+    t = table.add_row(t, ["1"])
+    t = table.set_style(t, "markdown")
+    t = table.set_header_line(t, false)
+    // Column "1" is numeric → auto right-aligned, header follows.
+    assert_eq(table.render(t), "|   A |\n|   1 |\n")
+}
+
+@test
+func test_minimal_no_header_line() {
+    t := table.new(["A"])
+    t = table.add_row(t, ["1"])
+    t = table.set_style(t, "minimal")
+    t = table.set_header_line(t, false)
+    assert_eq(table.render(t), "A\n1\n")
+}
+
+@test
+func test_row_offset_window() {
+    t := table.new(["A"])
+    t = table.add_row(t, ["1"])
+    t = table.add_row(t, ["2"])
+    t = table.add_row(t, ["3"])
+    t = table.add_row(t, ["4"])
+    t = table.set_row_offset(t, 2)
+    got := table.render(t)
+    // Note "… +2 more" is 9 wide and stretches the column.
+    want := "╭───────────╮\n│         A │\n├───────────┤\n│         3 │\n│         4 │\n├───────────┤\n│ … +2 more │\n╰───────────╯\n"
+    assert_eq(got, want)
+}
+
+@test
+func test_row_offset_page_counts_both_sides() {
+    t := table.new(["A"])
+    t = table.add_row(t, ["1"])
+    t = table.add_row(t, ["2"])
+    t = table.add_row(t, ["3"])
+    t = table.add_row(t, ["4"])
+    t = table.add_row(t, ["5"])
+    t = table.set_row_offset(t, 1)
+    t = table.set_max_rows(t, 2)
+    got := table.render(t)
+    assert(got.contains("… +3 more"))
+    assert(got.contains("2"))
+    assert(got.contains("3"))
+}
+
+@test
+func test_row_offset_past_end() {
+    t := table.new(["A"])
+    t = table.add_row(t, ["1"])
+    t = table.add_row(t, ["2"])
+    t = table.set_row_offset(t, 9)
+    got := table.render(t)
+    // Empty window: header goes left (nothing numeric), note is 9 wide.
+    want := "╭───────────╮\n│ A         │\n│ … +2 more │\n╰───────────╯\n"
+    assert_eq(got, want)
+}
+
+@test
+func test_row_offset_negative_is_zero() {
+    t := table.new(["A"])
+    t = table.add_row(t, ["1"])
+    t = table.add_row(t, ["2"])
+    t = table.set_row_offset(t, 0 - 3)
+    got := table.render(t)
+    assert(got.contains("1"))
+    assert(got.contains("2"))
+}
+
+@test
+func test_row_offset_hidden_rows_ignore_widths() {
+    t := table.new(["A"])
+    t = table.add_row(t, ["longvalue"])
+    t = table.add_row(t, ["x"])
+    t = table.set_row_offset(t, 1)
+    got := table.render(t)
+    // The "+1 more" note widens the column past the shown "x".
+    assert(got.contains("x"))
+    assert_eq(got.contains("longvalue"), false)
+}
+
+@test
+func test_caption_framed() {
+    t := table.new(["A"])
+    t = table.add_row(t, ["1"])
+    t = table.set_caption(t, "src: db")
+    assert_eq(table.render(t), "╭───╮\n│ A │\n├───┤\n│ 1 │\n╰───╯\nsrc: db\n")
+}
+
+@test
+func test_caption_all_styles() {
+    t := table.new(["A"])
+    t = table.add_row(t, ["1"])
+    t = table.set_caption(t, "n = 1")
+    md := table.render(table.set_style(t, "markdown"))
+    assert(md.contains("n = 1"))
+    mn := table.render(table.set_style(t, "minimal"))
+    assert(mn.contains("n = 1"))
+}
+
+@test
+func test_caption_sanitized() {
+    t := table.new(["A"])
+    t = table.add_row(t, ["1"])
+    t = table.set_caption(t, "a\nb")
+    assert(table.render(t).contains("a b"))
+}
+
+@test
+func test_display_pack_pipeline() {
+    got := table.new(["AB"])
+        |> table.add_row(["123"])
+        |> table.set_header_align("left")
+        |> table.set_caption("cap")
+        |> table.set_row_offset(0)
+        |> table.render()
+    assert(got.contains("AB"))
+    assert(got.contains("cap"))
+}

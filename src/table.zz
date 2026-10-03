@@ -153,6 +153,13 @@ pub func set_align_all(t: model.Table, mode: str) -> model.Table {
     model.set_align_all(t, mode)
 }
 
+/// Set header alignment independently from body cells: "left" |
+/// "center" | "right" | "auto" (default: follow each column).
+
+pub func set_header_align(t: model.Table, mode: str) -> model.Table {
+    model.set_header_align(t, mode)
+}
+
 /// Cell padding per side (spaces). Clamped to 0..8.
 
 pub func set_padding(t: model.Table, n: int) -> model.Table {
@@ -163,6 +170,14 @@ pub func set_padding(t: model.Table, n: int) -> model.Table {
 
 pub func set_title(t: model.Table, title: str) -> model.Table {
     model.set_title(t, title)
+}
+
+/// Caption line printed below the table (sources, units, footnotes).
+/// Sanitized like cells, so embedded newlines cannot break the grid.
+/// Empty hides it.
+
+pub func set_caption(t: model.Table, caption: str) -> model.Table {
+    model.set_caption(t, caption)
 }
 
 /// Footer row (e.g. totals). Rendered after a separator, before the
@@ -188,6 +203,15 @@ pub func set_max_rows(t: model.Table, n: int) -> model.Table {
     model.set_max_rows(t, n)
 }
 
+/// Skip the first `n` body rows (paging partner for `set_max_rows`).
+/// The trailing note counts all hidden rows, above and below.
+/// Negative values are treated as `0`; past-the-end renders headers
+/// (plus note and footer) with an empty body.
+
+pub func set_row_offset(t: model.Table, n: int) -> model.Table {
+    model.set_row_offset(t, n)
+}
+
 /// Cap one column's visible width (overrides `set_max_width` for that
 /// column). Out-of-range columns are ignored. `0` clears the cap.
 
@@ -200,6 +224,22 @@ pub func set_col_max_width(t: model.Table, col: int, n: int) -> model.Table {
 
 pub func set_row_lines(t: model.Table, on: bool) -> model.Table {
     model.set_row_lines(t, on)
+}
+
+/// Show or hide the outer frame (top/bottom rules and side borders).
+/// Inner column separators stay. Markdown drops its edge pipes
+/// (still valid markdown); minimal has no frame, so this is a no-op
+/// there. Default: shown.
+
+pub func set_outer_border(t: model.Table, on: bool) -> model.Table {
+    model.set_outer_border(t, on)
+}
+
+/// Show or hide the separator between header and body. Hiding it
+/// merges header and rows into one unruled block. Default: shown.
+
+pub func set_header_line(t: model.Table, on: bool) -> model.Table {
+    model.set_header_line(t, on)
 }
 
 /// Render to a string (trailing newline included, no printing).

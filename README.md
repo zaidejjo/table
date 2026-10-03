@@ -68,21 +68,46 @@ Unknown names fall back to `"rounded"`. `table.styles()` lists all seven.
 ```zz
 t = table.set_align(t, 1, "right")   // "left" | "center" | "right", per column
 t = table.set_align_all(t, "center") // every column at once
+t = table.set_header_align(t, "center") // headers only; "auto" follows columns
 t = table.set_padding(t, 2)          // spaces per side, clamped 0..8
 t = table.set_row_lines(t, true)     // separator between every row
 t = table.add_rows(t, rows)          // bulk append
 t = table.from_rows(headers, rows)   // build in one call
 ```
 
-## Title and footer
+## Title, footer, caption
 
 ```zz
 t = table.set_title(t, "Stock")      // centered above the table
 t = table.set_footer(t, ["Total", "14"])
+t = table.set_caption(t, "src: db")  // plain line below the table
 ```
 
 The footer renders after its own separator, before the bottom border —
 the natural place for totals. Markdown renders the title as `# …`.
+
+## Borders
+
+```zz
+t = table.set_outer_border(t, false) // no frame: no top/bottom rules, no sides
+t = table.set_header_line(t, false)  // no separator between header and body
+```
+
+Inner column separators stay. Markdown drops its edge pipes (still
+valid markdown); minimal has no frame, so the outer toggle is a no-op
+there.
+
+## Paging
+
+```zz
+t = table.set_max_rows(t, 10)  // body cap, overflow note counts hidden rows
+t = table.set_row_offset(t, 20) // skip the first 20 body rows: page 3
+```
+
+Offset and cap compose into pages. The trailing `… +N more` note
+counts every hidden row, above and below the window. Widths and
+auto-alignment only see the shown window, so hidden rows never stretch
+columns.
 
 ## Colors
 
@@ -109,9 +134,11 @@ table.print(t) // render + println in one call
   closure; the `std.sqlz` bridge, pipeline-first argument order.
 - `column(rows, f)` / `from_cols(headers, cols)` — build column by
   column, then transpose (short columns pad with `""`).
-- `set_style` / `set_align` / `set_align_all` / `set_padding` /
-  `set_title` / `set_footer` / `set_row_lines` — builders above.
+- `set_style` / `set_align` / `set_align_all` / `set_header_align` /
+  `set_padding` / `set_title` / `set_caption` / `set_footer` /
+  `set_row_lines` / `set_outer_border` / `set_header_line` — builders above.
 - `set_max_width` / `set_col_max_width` — truncation caps (`0` = off).
+- `set_max_rows` / `set_row_offset` — paging (`0` = off / start).
 - `from_json(headers, text)` — JSON array-of-arrays / array-of-objects.
 - `render(t)` — string (trailing newline included).
 - `print(t)` — `println(render(t))`.
@@ -180,12 +207,15 @@ invalid JSON yields a headers-only table, never an error.
 
 ## Tests
 
-`zz test` runs 32 checks: golden rounded output, per-column
-alignment (incl. sticky `set_align_all`), footer separator, title,
-all seven glyph sets, fallback paths, uneven rows, empty tables,
-newline folding, ANSI-safe widths, bulk APIs, row lines, padding
-clamps, five `std.sqlz` bridge checks (struct rows, `|>` pipelines,
-unannotated rows, `column`/`from_cols`, empty results), plus eleven
-v0.2.0 checks (truncation goldens, per-column caps, colored
+`zz test` runs 58 checks: golden rounded output, per-column
+alignment (incl. sticky `set_align_all`), header alignment, border
+toggles across styles, row-offset paging, captions, footer separator,
+title, all seven glyph sets, fallback paths, uneven rows, empty
+tables, newline folding, ANSI-safe widths, bulk APIs, row lines,
+padding clamps, five `std.sqlz` bridge checks (struct rows, `|>`
+pipelines, unannotated rows, `column`/`from_cols`, empty results),
+eleven v0.2.0 checks (truncation goldens, per-column caps, colored
 truncation without bleed, markdown/minimal truncation, JSON shapes,
-derived headers, invalid-JSON empties, pipeline fluency).
+derived headers, invalid-JSON empties, pipeline fluency), plus
+eighteen v0.3.0 checks (header goldens, frameless/borderless outputs,
+offset windows and page counts, width isolation, caption goldens).
