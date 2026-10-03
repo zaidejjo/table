@@ -1,0 +1,679 @@
+// table — beautiful rounded CLI tables, pure ZZ, zero dependencies.
+//
+// Default style is rounded Unicode (no ASCII `+--+`):
+//
+//   ╭────────┬─────╮
+//   │ NAME   │ AGE │
+//   ├────────┼─────┤
+//   │ Alice  │ 25  │
+//   │ Bob    │ 30  │
+//   ╰────────┴─────╯
+//
+// Quick start:
+//
+//   import table
+//
+//   t := table.new(["NAME", "AGE"])
+//   t = table.add_row(t, ["Alice", "25"])
+//   t = table.add_row(t, ["Bob", "30"])
+//   println(table.render(t))
+//
+// One-liner:
+//
+//   println(table.simple(["A", "B"], [["1", "2"]]))
+//
+// Colors: pass `std.colors` output straight in — widths stay aligned
+// because measuring strips ANSI (`\e[...m`) before counting:
+//
+//   import std.colors
+//   t := table.new([colors.bold("NAME"), colors.bold("AGE")])
+//   t = table.add_row(t, ["Alice", colors.green("25")])
+//   table.print(t)
+//
+// Styles: "rounded" (default), "sharp", "heavy", "double",
+// "markdown", "minimal", "ascii". Unknown names fall back to rounded.
+// Aligns: "left" (default), "center", "right" — per column.
+//
+// Performance: single width pass (O(cells)), one allocation per line,
+// `str.repeat` doubling for rules. No regex, no I/O, no globals.
+
+import std.str
+import std.vec
+
+/// A table under construction. Passed by value — re-bind after each call:
+///
+///   t := table.new(["A"])
+///   t = table.add_row(t, ["1"])
+
+pub struct Table {
+    headers: [str],
+    rows: [[str]],
+    aligns: [str],
+    def_align: str,
+    style: str,
+    padding: int,
+    title: str,
+    footer: [str],
+    row_lines: bool,
+}
+
+/// Create a table with header cells. Style defaults to "rounded".
+
+pub func new(headers: [str]) -> Table {
+    aligns:[str] = []
+    i := 0
+    n := len(headers)
+    while i < n {
+        aligns = vec.push(aligns, "left")
+        i = i + 1
+    }
+    Table{headers: headers, rows: [], aligns: aligns, def_align: "left", style: "rounded", padding: 1, title: "", footer: [], row_lines: false}
+}
+
+/// Create a table from headers plus all rows at once.
+
+pub func from_rows(headers: [str], rows: [[str]]) -> Table {
+    t := new(headers)
+    t = add_rows(t, rows)
+    t
+}
+
+/// One-liner: build and render immediately.
+
+pub func simple(headers: [str], rows: [[str]]) -> str {
+    render(from_rows(headers, rows))
+}
+
+/// Append one row. Short rows are padded with ""; long rows are kept
+/// whole (extra cells render). Never fails.
+
+pub func add_row(t: Table, row: [str]) -> Table {
+    t.rows = vec.push(t.rows, row)
+    // Keep aligns as long as the widest row seen so far. Late columns
+    // inherit the sticky default from set_align_all.
+    i := len(t.aligns)
+    m := len(row)
+    while i < m {
+        t.aligns = vec.push(t.aligns, t.def_align)
+        i = i + 1
+    }
+    t
+}
+
+/// Append many rows at once (cheaper than looping in user code).
+
+pub func add_rows(t: Table, rows: [[str]]) -> Table {
+    i := 0
+    n := len(rows)
+    while i < n {
+        t = add_row(t, rows[i])
+        i = i + 1
+    }
+    t
+}
+
+/// Switch border style. Unknown names fall back to "rounded".
+/// See `styles()` for the full list.
+
+pub func set_style(t: Table, style: str) -> Table {
+    t.style = style_name(style)
+    t
+}
+
+/// Set one column's alignment: "left" | "center" | "right".
+/// Out-of-range columns and bad modes are ignored (no panic).
+
+pub func set_align(t: Table, col: int, mode: str) -> Table {
+    m := align_name(mode)
+    if col < 0 {
+        return t
+    }
+    if col >= len(t.aligns) {
+        return t
+    }
+    t.aligns[col] = m
+    t
+}
+
+/// Set every column's alignment at once. Sticky: columns added later
+/// inherit this mode.
+
+pub func set_align_all(t: Table, mode: str) -> Table {
+    m := align_name(mode)
+    t.def_align = m
+    i := 0
+    n := len(t.aligns)
+    while i < n {
+        t.aligns[i] = m
+        i = i + 1
+    }
+    t
+}
+
+/// Cell padding per side (spaces). Clamped to 0..8.
+
+pub func set_padding(t: Table, n: int) -> Table {
+    p := n
+    if p < 0 {
+        p = 0
+    }
+    if p > 8 {
+        p = 8
+    }
+    t.padding = p
+    t
+}
+
+/// Centered title printed above the table. Empty hides it.
+
+pub func set_title(t: Table, title: str) -> Table {
+    t.title = title
+    t
+}
+
+/// Footer row (e.g. totals). Rendered after a separator, before the
+/// bottom border. Empty hides it.
+
+pub func set_footer(t: Table, footer: [str]) -> Table {
+    t.footer = footer
+    i := len(t.aligns)
+    m := len(footer)
+    while i < m {
+        t.aligns = vec.push(t.aligns, t.def_align)
+        i = i + 1
+    }
+    t
+}
+
+/// Draw a separator between every data row (default: only under the
+/// header and above the footer).
+
+pub func set_row_lines(t: Table, on: bool) -> Table {
+    t.row_lines = on
+    t
+}
+
+/// Render to a string (trailing newline included, no printing).
+
+pub func render(t: Table) -> str {
+    st := style_name(t.style)
+    if st == "markdown" {
+        return render_markdown(t)
+    }
+    if st == "minimal" {
+        return render_minimal(t)
+    }
+    render_framed(t, st)
+}
+
+/// Print the table to stdout.
+
+pub func print(t: Table) {
+    println(render(t))
+}
+
+/// All style names accepted by `set_style`.
+
+pub func styles() -> [str] {
+    ["rounded", "sharp", "heavy", "double", "markdown", "minimal", "ascii"]
+}
+
+/// Visible width of a cell: ANSI `\e[...m` sequences (from `std.colors`)
+/// contribute 0, every other char contributes 1. Box glyphs (`╭`, `─`)
+/// count as 1 each, matching terminal columns.
+
+pub func visible_len(s: str) -> int {
+    chars := str.split(s, "")
+    n := 0
+    esc := 0
+    i := 0
+    total := len(chars)
+    c := ""
+    while i < total {
+        c = chars[i]
+        if c == "\e" {
+            esc = 1
+        } else {
+            if esc == 1 {
+                if c == "m" {
+                    esc = 0
+                }
+            } else {
+                if c != "" {
+                    n = n + 1
+                }
+            }
+        }
+        i = i + 1
+    }
+    n
+}
+
+// ── internals ──
+
+func style_name(s: str) -> str {
+    if s == "rounded" {
+        return "rounded"
+    }
+    if s == "sharp" {
+        return "sharp"
+    }
+    if s == "heavy" {
+        return "heavy"
+    }
+    if s == "double" {
+        return "double"
+    }
+    if s == "markdown" {
+        return "markdown"
+    }
+    if s == "minimal" {
+        return "minimal"
+    }
+    if s == "ascii" {
+        return "ascii"
+    }
+    "rounded"
+}
+
+func align_name(m: str) -> str {
+    if m == "right" {
+        return "right"
+    }
+    if m == "center" {
+        return "center"
+    }
+    "left"
+}
+
+// Single-line cells only: embedded newlines/tabs would break the grid,
+// so fold them to spaces. Pure and total on any input.
+
+func sanitize(s: str) -> str {
+    r := str.replace(s, "\r", "")
+    r = str.replace(r, "\n", " ")
+    r = str.replace(r, "\t", " ")
+    r
+}
+
+func cell_at(row: [str], i: int) -> str {
+    if i < 0 {
+        return ""
+    }
+    if i >= len(row) {
+        return ""
+    }
+    sanitize(row[i])
+}
+
+func align_at(t: Table, i: int) -> str {
+    if i < 0 {
+        return align_name(t.def_align)
+    }
+    if i >= len(t.aligns) {
+        return align_name(t.def_align)
+    }
+    align_name(t.aligns[i])
+}
+
+func col_count(t: Table) -> int {
+    n := len(t.headers)
+    i := 0
+    m := len(t.rows)
+    while i < m {
+        w := len(t.rows[i])
+        if w > n {
+            n = w
+        }
+        i = i + 1
+    }
+    f := len(t.footer)
+    if f > n {
+        n = f
+    }
+    n
+}
+
+func col_widths(t: Table, ncols: int) -> [int] {
+    widths:[int] = []
+    i := 0
+    while i < ncols {
+        widths = vec.push(widths, 0)
+        i = i + 1
+    }
+    i = 0
+    while i < ncols {
+        w := visible_len(cell_at(t.headers, i))
+        if w > widths[i] {
+            widths[i] = w
+        }
+        i = i + 1
+    }
+    r := 0
+    nr := len(t.rows)
+    while r < nr {
+        i = 0
+        while i < ncols {
+            w := visible_len(cell_at(t.rows[r], i))
+            if w > widths[i] {
+                widths[i] = w
+            }
+            i = i + 1
+        }
+        r = r + 1
+    }
+    i = 0
+    while i < ncols {
+        w := visible_len(cell_at(t.footer, i))
+        if w > widths[i] {
+            widths[i] = w
+        }
+        i = i + 1
+    }
+    widths
+}
+
+// Pad one cell to `width` visible columns. ANSI codes add bytes but no
+// width, so pad by the gap between visible and target.
+
+func pad_cell(s: str, width: int, mode: str) -> str {
+    v := visible_len(s)
+    gap := width - v
+    if gap <= 0 {
+        return s
+    }
+    if mode == "right" {
+        return str.repeat(" ", gap) + s
+    }
+    if mode == "center" {
+        left := gap / 2
+        right := gap - left
+        return str.repeat(" ", left) + s + str.repeat(" ", right)
+    }
+    s + str.repeat(" ", gap)
+}
+
+// Border glyphs per style: [tl, tr, bl, br, h, v, lt, rt, tt, bt, mj]
+
+func glyphs(st: str) -> [str] {
+    if st == "sharp" {
+        return ["┌", "┐", "└", "┘", "─", "│", "├", "┤", "┬", "┴", "┼"]
+    }
+    if st == "heavy" {
+        return ["┏", "┓", "┗", "┛", "━", "┃", "┣", "┫", "┳", "┻", "╋"]
+    }
+    if st == "double" {
+        return ["╔", "╗", "╚", "╝", "═", "║", "╠", "╣", "╦", "╩", "╬"]
+    }
+    if st == "ascii" {
+        return ["+", "+", "+", "+", "-", "|", "+", "+", "+", "+", "+"]
+    }
+    ["╭", "╮", "╰", "╯", "─", "│", "├", "┤", "┬", "┴", "┼"]
+}
+
+func rule_line(g: [str], pos: int, widths: [int], pad: int) -> str {
+    // pos: 0 top, 1 mid, 2 bottom
+    left := ""
+    mid := ""
+    right := ""
+    if pos == 0 {
+        left = g[0]
+        mid = g[8]
+        right = g[1]
+    } else {
+        if pos == 2 {
+            left = g[2]
+            mid = g[9]
+            right = g[3]
+        } else {
+            left = g[6]
+            mid = g[10]
+            right = g[7]
+        }
+    }
+    fill := g[4]
+    out := left
+    i := 0
+    n := len(widths)
+    while i < n {
+        seg := widths[i] + pad * 2
+        out = out + str.repeat(fill, seg)
+        if i + 1 < n {
+            out = out + mid
+        }
+        i = i + 1
+    }
+    out = out + right
+    out
+}
+
+func data_line(t: Table, cells: [str], widths: [int], v: str) -> str {
+    pad := t.padding
+    gap := str.repeat(" ", pad)
+    out := v
+    i := 0
+    n := len(widths)
+    while i < n {
+        raw := cell_at(cells, i)
+        mode := align_at(t, i)
+        out = out + gap + pad_cell(raw, widths[i], mode) + gap
+        if i + 1 < n {
+            out = out + v
+        }
+        i = i + 1
+    }
+    out = out + v
+    out
+}
+
+func inner_width(widths: [int], pad: int) -> int {
+    total := 0
+    i := 0
+    n := len(widths)
+    while i < n {
+        total = total + widths[i] + pad * 2
+        i = i + 1
+    }
+    if n > 1 {
+        total = total + (n - 1)
+    }
+    total
+}
+
+func render_framed(t: Table, st: str) -> str {
+    ncols := col_count(t)
+    if ncols == 0 {
+        return ""
+    }
+    widths := col_widths(t, ncols)
+    g := glyphs(st)
+    v := g[5]
+    lines:[str] = []
+    if len(t.title) > 0 {
+        w := inner_width(widths, t.padding) + 2
+        tw := visible_len(t.title)
+        line := sanitize(t.title)
+        if tw < w {
+            gap := w - tw
+            left := gap / 2
+            right := gap - left
+            line = str.repeat(" ", left) + line + str.repeat(" ", right)
+        }
+        lines = vec.push(lines, line)
+    }
+    lines = vec.push(lines, rule_line(g, 0, widths, t.padding))
+    lines = vec.push(lines, data_line(t, t.headers, widths, v))
+    has_body := len(t.rows) > 0
+    has_foot := len(t.footer) > 0
+    if has_body || has_foot {
+        lines = vec.push(lines, rule_line(g, 1, widths, t.padding))
+    }
+    r := 0
+    nr := len(t.rows)
+    while r < nr {
+        lines = vec.push(lines, data_line(t, t.rows[r], widths, v))
+        if t.row_lines {
+            if r + 1 < nr || has_foot {
+                lines = vec.push(lines, rule_line(g, 1, widths, t.padding))
+            }
+        }
+        r = r + 1
+    }
+    if has_foot {
+        // Separator above the footer: row_lines mode already emitted one
+        // after the last body row, and the headers-only case is covered
+        // by the header separator. Otherwise draw it here.
+        sep_done := false
+        if t.row_lines {
+            if has_body {
+                sep_done = true
+            }
+        } else {
+            if has_body == false {
+                sep_done = true
+            }
+        }
+        if sep_done == false {
+            lines = vec.push(lines, rule_line(g, 1, widths, t.padding))
+        }
+        lines = vec.push(lines, data_line(t, t.footer, widths, v))
+    }
+    lines = vec.push(lines, rule_line(g, 2, widths, t.padding))
+    vec.join(lines, "\n") + "\n"
+}
+
+func render_markdown(t: Table) -> str {
+    ncols := col_count(t)
+    if ncols == 0 {
+        return ""
+    }
+    widths := col_widths(t, ncols)
+    // Markdown needs at least 3 dashes per column — widen narrow
+    // columns so header, separator, and rows share one width.
+    i := 0
+    while i < ncols {
+        if widths[i] < 3 {
+            widths[i] = 3
+        }
+        i = i + 1
+    }
+    lines:[str] = []
+    if len(t.title) > 0 {
+        lines = vec.push(lines, "# " + sanitize(t.title))
+    }
+    header := "|"
+    sep := "|"
+    i = 0
+    while i < ncols {
+        raw := cell_at(t.headers, i)
+        mode := align_at(t, i)
+        header = header + " " + pad_cell(raw, widths[i], mode) + " |"
+        dashes := widths[i]
+        mark := str.repeat("-", dashes)
+        if mode == "right" {
+            mark = str.repeat("-", dashes - 1) + ":"
+        } else {
+            if mode == "center" {
+                mark = ":" + str.repeat("-", dashes - 2) + ":"
+            }
+        }
+        sep = sep + " " + mark + " |"
+        i = i + 1
+    }
+    lines = vec.push(lines, header)
+    lines = vec.push(lines, sep)
+    r := 0
+    nr := len(t.rows)
+    while r < nr {
+        row := "|"
+        i = 0
+        while i < ncols {
+            raw := cell_at(t.rows[r], i)
+            mode := align_at(t, i)
+            row = row + " " + pad_cell(raw, widths[i], mode) + " |"
+            i = i + 1
+        }
+        lines = vec.push(lines, row)
+        r = r + 1
+    }
+    if len(t.footer) > 0 {
+        row := "|"
+        i = 0
+        while i < ncols {
+            raw := cell_at(t.footer, i)
+            mode := align_at(t, i)
+            row = row + " " + pad_cell(raw, widths[i], mode) + " |"
+            i = i + 1
+        }
+        lines = vec.push(lines, row)
+    }
+    vec.join(lines, "\n") + "\n"
+}
+
+func render_minimal(t: Table) -> str {
+    ncols := col_count(t)
+    if ncols == 0 {
+        return ""
+    }
+    widths := col_widths(t, ncols)
+    lines:[str] = []
+    if len(t.title) > 0 {
+        lines = vec.push(lines, sanitize(t.title))
+    }
+    gap2 := "  "
+    header := ""
+    i := 0
+    while i < ncols {
+        raw := cell_at(t.headers, i)
+        mode := align_at(t, i)
+        header = header + pad_cell(raw, widths[i], mode)
+        if i + 1 < ncols {
+            header = header + gap2
+        }
+        i = i + 1
+    }
+    lines = vec.push(lines, header)
+    rule := ""
+    i = 0
+    while i < ncols {
+        rule = rule + str.repeat("─", widths[i])
+        if i + 1 < ncols {
+            rule = rule + gap2
+        }
+        i = i + 1
+    }
+    lines = vec.push(lines, rule)
+    r := 0
+    nr := len(t.rows)
+    while r < nr {
+        row := ""
+        i = 0
+        while i < ncols {
+            raw := cell_at(t.rows[r], i)
+            mode := align_at(t, i)
+            row = row + pad_cell(raw, widths[i], mode)
+            if i + 1 < ncols {
+                row = row + gap2
+            }
+            i = i + 1
+        }
+        lines = vec.push(lines, row)
+        r = r + 1
+    }
+    if len(t.footer) > 0 {
+        lines = vec.push(lines, rule)
+        row := ""
+        i = 0
+        while i < ncols {
+            raw := cell_at(t.footer, i)
+            mode := align_at(t, i)
+            row = row + pad_cell(raw, widths[i], mode)
+            if i + 1 < ncols {
+                row = row + gap2
+            }
+            i = i + 1
+        }
+        lines = vec.push(lines, row)
+    }
+    vec.join(lines, "\n") + "\n"
+}

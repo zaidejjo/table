@@ -1,0 +1,30 @@
+// Demo of the table lib. Run from examples/:
+//   zz install && zz run demo.zz
+import std.colors
+
+import table
+
+func main() {
+    // Basic rounded table (default style).
+    t := table.new(["NAME", "AGE", "CITY"])
+    t = table.add_row(t, ["Alice", "25", "New York"])
+    t = table.add_row(t, ["Bob", "30", "Boston"])
+    t = table.set_align(t, 1, "right")
+    println(table.render(t))
+    // Title + footer (totals).
+    u := table.new(["ITEM", "QTY"])
+    u = table.add_row(u, ["apples", "10"])
+    u = table.add_row(u, ["oranges", "4"])
+    u = table.set_title(u, "Stock")
+    u = table.set_footer(u, ["Total", "14"])
+    table.print(u)
+    // Colors compose freely — widths stay aligned.
+    c := table.new([colors.bold("NAME"), colors.bold("AGE")])
+    c = table.add_row(c, ["Alice", colors.green("25")])
+    c = table.add_row(c, ["Bob", colors.red("30")])
+    table.print(c)
+    // Markdown output for docs and issues.
+    m := table.set_style(t, "markdown")
+    println(table.render(m))
+    println("demo_ok")
+}

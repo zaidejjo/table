@@ -1,0 +1,176 @@
+// table_test.zz — golden + behavior tests for the table lib.
+import std.colors
+
+import table
+
+@test
+func test_rounded_golden() {
+    t := table.new(["NAME", "AGE"])
+    t = table.add_row(t, ["Alice", "25"])
+    t = table.add_row(t, ["Bob", "30"])
+    got := table.render(t)
+    want := "╭───────┬─────╮\n│ NAME  │ AGE │\n├───────┼─────┤\n│ Alice │ 25  │\n│ Bob   │ 30  │\n╰───────┴─────╯\n"
+    assert_eq(got, want)
+}
+
+@test
+func test_right_align() {
+    t := table.new(["N", "AGE"])
+    t = table.add_row(t, ["a", "5"])
+    t = table.add_row(t, ["bb", "25"])
+    t = table.set_align(t, 1, "right")
+    got := table.render(t)
+    want := "╭────┬─────╮\n│ N  │ AGE │\n├────┼─────┤\n│ a  │   5 │\n│ bb │  25 │\n╰────┴─────╯\n"
+    assert_eq(got, want)
+}
+
+@test
+func test_center_align() {
+    t := table.new(["K"])
+    t = table.add_row(t, ["ab"])
+    t = table.set_align_all(t, "center")
+    got := table.render(t)
+    want := "╭────╮\n│ K  │\n├────┤\n│ ab │\n╰────╯\n"
+    assert_eq(got, want)
+}
+
+@test
+func test_footer_separator() {
+    t := table.new(["A", "B"])
+    t = table.add_row(t, ["1", "2"])
+    t = table.set_footer(t, ["T", "3"])
+    got := table.render(t)
+    want := "╭───┬───╮\n│ A │ B │\n├───┼───┤\n│ 1 │ 2 │\n├───┼───┤\n│ T │ 3 │\n╰───┴───╯\n"
+    assert_eq(got, want)
+}
+
+@test
+func test_title_rendered() {
+    t := table.new(["A"])
+    t = table.add_row(t, ["1"])
+    t = table.set_title(t, "Hi")
+    got := table.render(t)
+    want := " Hi  \n╭───╮\n│ A │\n├───┤\n│ 1 │\n╰───╯\n"
+    assert_eq(got, want)
+}
+
+@test
+func test_styles_glyphs() {
+    base := table.from_rows(["A"], [["1"]])
+    sharp := table.render(table.set_style(base, "sharp"))
+    assert(sharp.contains("┌"))
+    assert(sharp.contains("┘"))
+    heavy := table.render(table.set_style(base, "heavy"))
+    assert(heavy.contains("┏"))
+    double := table.render(table.set_style(base, "double"))
+    assert(double.contains("╔"))
+    ascii := table.render(table.set_style(base, "ascii"))
+    assert(ascii.contains("+"))
+    assert(ascii.contains("-"))
+    minimal := table.render(table.set_style(base, "minimal"))
+    assert(minimal.contains("─"))
+    assert(minimal.contains("A"))
+    md := table.render(table.set_style(base, "markdown"))
+    assert(md.contains("| A"))
+    assert(md.contains("---"))
+}
+
+@test
+func test_unknown_style_falls_back() {
+    t := table.new(["A"])
+    t = table.add_row(t, ["1"])
+    t = table.set_style(t, "neon-laser")
+    assert(table.render(t).contains("╭"))
+}
+
+@test
+func test_bad_align_ignored() {
+    t := table.new(["A", "B"])
+    t = table.add_row(t, ["1", "2"])
+    t = table.set_align(t, 9, "right")
+    t = table.set_align(t, 0, "sideways")
+    got := table.render(t)
+    want := "╭───┬───╮\n│ A │ B │\n├───┼───┤\n│ 1 │ 2 │\n╰───┴───╯\n"
+    assert_eq(got, want)
+}
+
+@test
+func test_uneven_rows_pad() {
+    t := table.new(["A", "B", "C"])
+    t = table.add_row(t, ["only"])
+    got := table.render(t)
+    assert(got.contains("only"))
+    t2 := table.new(["A"])
+    t2 = table.add_row(t2, ["1", "EXTRA"])
+    assert(table.render(t2).contains("EXTRA"))
+}
+
+@test
+func test_empty_renders_empty() {
+    t := table.new([])
+    assert_eq(table.render(t), "")
+}
+
+@test
+func test_newlines_folded() {
+    t := table.new(["A"])
+    t = table.add_row(t, ["x\ny"])
+    got := table.render(t)
+    assert(got.contains("x y"))
+    assert_eq(table.visible_len("a\nb"), 3)
+}
+
+@test
+func test_colors_stay_aligned() {
+    assert_eq(table.visible_len(colors.green("25")), 2)
+    assert_eq(table.visible_len(colors.bold("NAME")), 4)
+    t := table.new([colors.bold("NAME")])
+    t = table.add_row(t, ["Alice"])
+    t = table.add_row(t, [colors.red("Bo")])
+    got := table.render(t)
+    // Both columns are width 5: header pads 1, "Bo" pads 3 after reset.
+    assert(got.contains(colors.bold("NAME") + " "))
+    assert(got.contains(colors.red("Bo") + "   "))
+}
+
+@test
+func test_simple_and_bulk() {
+    got := table.simple(["K"], [["v1"], ["v22"]])
+    assert(got.contains("v22"))
+    t := table.new(["K"])
+    t = table.add_rows(t, [["a"], ["b"]])
+    assert(table.render(t).contains("b"))
+}
+
+@test
+func test_row_lines() {
+    t := table.new(["A"])
+    t = table.add_row(t, ["1"])
+    t = table.add_row(t, ["2"])
+    t = table.set_row_lines(t, true)
+    got := table.render(t)
+    // top + header sep + mid between rows + bottom = 4 rules
+    assert_eq(got, "╭───╮\n│ A │\n├───┤\n│ 1 │\n├───┤\n│ 2 │\n╰───╯\n")
+}
+
+@test
+func test_align_all_sticky_for_late_columns() {
+    t := table.new(["A"])
+    t = table.set_align_all(t, "right")
+    t = table.add_row(t, ["1", "22"])
+    got := table.render(t)
+    assert_eq(got, "╭───┬────╮\n│ A │    │\n├───┼────┤\n│ 1 │ 22 │\n╰───┴────╯\n")
+}
+
+@test
+func test_padding_and_styles_list() {
+    t := table.new(["A"])
+    t = table.add_row(t, ["1"])
+    t = table.set_padding(t, 0)
+    assert_eq(table.render(t), "╭─╮\n│A│\n├─┤\n│1│\n╰─╯\n")
+    t = table.set_padding(t, 99)
+    got := table.render(t)
+    assert(got.contains("        "))
+    all := table.styles()
+    assert_eq(len(all), 7)
+}
