@@ -22,7 +22,8 @@ func test_from_structs() {
     users:[User] = mydb.query("""SELECT id, name FROM users""")
     t := table.from(users, ["ID", "NAME"], |u: User| [str(u.id), u.name])
     got := table.render(t)
-    want := "╭────┬───────╮\n│ ID │ NAME  │\n├────┼───────┤\n│ 1  │ alice │\n│ 2  │ bob   │\n╰────┴───────╯\n"
+    // ID auto-aligns right: all cells numeric.
+    want := "╭────┬───────╮\n│ ID │ NAME  │\n├────┼───────┤\n│  1 │ alice │\n│  2 │ bob   │\n╰────┴───────╯\n"
     assert_eq(got, want)
 }
 

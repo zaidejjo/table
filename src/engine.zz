@@ -1,0 +1,587 @@
+// engine.zz — widths, lines, borders, and the three renderers.
+// Reads model.Table fields; never constructs tables.
+import std.str
+import std.vec
+
+import model
+import text
+import theme
+
+/// One-liner: build and render immediately.
+
+pub func simple(headers: [str], rows: [[str]]) -> str {
+    render(model.from_rows(headers, rows))
+}
+
+/// Render to a string (trailing newline included, no printing).
+
+pub func render(t: model.Table) -> str {
+    st := theme.style_name(t.style)
+    if st == "markdown" {
+        return render_markdown(t)
+    }
+    if st == "minimal" {
+        return render_minimal(t)
+    }
+    render_framed(t, st)
+}
+
+/// Print the table to stdout.
+
+pub func print(t: model.Table) {
+    println(render(t))
+}
+
+// ── internals ──
+
+// A column is numeric when every non-empty body/footer cell looks
+// numeric. Headers never vote (they are usually words).
+
+func col_is_numeric(t: model.Table, i: int, shown: int) -> bool {
+    seen:int = 0
+    r := 0
+    nr := len(t.rows)
+    while r < nr && r < shown {
+        if i >= 0 && i < len(t.rows[r]) {
+            c := text.sanitize(t.rows[r][i])
+            if c != "" {
+                seen = 1
+                if text.is_num_text(c) == false {
+                    return false
+                }
+            }
+        }
+        r = r + 1
+    }
+    f := 0
+    nf := len(t.footer)
+    while f < nf {
+        if i == f {
+            c := text.sanitize(t.footer[f])
+            if c != "" {
+                seen = 1
+                if text.is_num_text(c) == false {
+                    return false
+                }
+            }
+        }
+        f = f + 1
+    }
+    seen == 1
+}
+
+func cell_at(t: model.Table, row: [str], i: int, capson: int) -> str {
+    if i < 0 {
+        return ""
+    }
+    if i >= len(row) {
+        return ""
+    }
+    s := text.sanitize(row[i])
+    // Truncation caps. The on/off check is hoisted to callers (once per
+    // row, not per cell): a debug-VM call costs ~1ms, and this runs per
+    // cell. Per-column cap wins, otherwise the global max.
+    if capson == 0 {
+        return s
+    }
+    cap := t.max_width
+    if i < len(t.col_caps) {
+        c := t.col_caps[i]
+        if c > 0 {
+            cap = c
+        }
+    }
+    if cap <= 0 {
+        return s
+    }
+    if text.visible_len(s) <= cap {
+        return s
+    }
+    text.truncate_ansi(s, cap)
+}
+
+// 1 when any cap is set (global or per-column), else 0. Computed once
+// per render and threaded through cell_at.
+
+func caps_on(t: model.Table) -> int {
+    if t.max_width > 0 {
+        return 1
+    }
+    i := 0
+    n := len(t.col_caps)
+    while i < n {
+        if t.col_caps[i] > 0 {
+            return 1
+        }
+        i = i + 1
+    }
+    0
+}
+
+func align_at(t: model.Table, i: int) -> str {
+    if i < 0 {
+        return theme.align_name(t.def_align)
+    }
+    if i >= len(t.aligns) {
+        return theme.align_name(t.def_align)
+    }
+    theme.align_name(t.aligns[i])
+}
+
+// Concrete alignment for output: explicit modes pass through, "auto"
+// (the default) goes right for numeric columns, left otherwise.
+
+func resolve_align(t: model.Table, i: int, shown: int) -> str {
+    m := align_at(t, i)
+    if m != "auto" {
+        return m
+    }
+    if col_is_numeric(t, i, shown) {
+        return "right"
+    }
+    "left"
+}
+
+func col_count(t: model.Table) -> int {
+    n := len(t.headers)
+    i := 0
+    m := len(t.rows)
+    while i < m {
+        w := len(t.rows[i])
+        if w > n {
+            n = w
+        }
+        i = i + 1
+    }
+    f := len(t.footer)
+    if f > n {
+        n = f
+    }
+    n
+}
+
+// Visible body rows under `max_rows` (all rows when capped off).
+
+func shown_rows(t: model.Table) -> int {
+    nr := len(t.rows)
+    if t.max_rows > 0 && nr > t.max_rows {
+        return t.max_rows
+    }
+    nr
+}
+
+// Hidden body rows under `max_rows` (0 when capped off or fitting).
+
+func overflow_rows(t: model.Table) -> int {
+    nr := len(t.rows)
+    if t.max_rows > 0 && nr > t.max_rows {
+        return nr - t.max_rows
+    }
+    0
+}
+
+// The `… +N more` note row, padded to `ncols` with blanks.
+
+func note_row(ncols: int, overflow: int) -> [str] {
+    out:[str] = []
+    out = vec.push(out, "… +{overflow} more")
+    i := 1
+    while i < ncols {
+        out = vec.push(out, "")
+        i = i + 1
+    }
+    out
+}
+
+func widen_row(widths: [int], cells: [str]) -> [int] {
+    i := 0
+    n := len(widths)
+    while i < n {
+        w := text.visible_len(cells[i])
+        if w > widths[i] {
+            widths[i] = w
+        }
+        i = i + 1
+    }
+    widths
+}
+
+// Column widths: max visible length over headers, shown rows, note,
+// and footer. Cells arrive sanitized and truncated via cell_at, so
+// widths match exactly what data_line prints. Computed once per
+// render and reused for rules, padding, and title centering.
+
+func col_widths(t: model.Table, ncols: int, co: int) -> [int] {
+    widths:[int] = []
+    i := 0
+    while i < ncols {
+        widths = vec.push(widths, 0)
+        i = i + 1
+    }
+    i = 0
+    while i < ncols {
+        w := text.visible_len(cell_at(t, t.headers, i, co))
+        if w > widths[i] {
+            widths[i] = w
+        }
+        i = i + 1
+    }
+    r := 0
+    nr := len(t.rows)
+    shown := shown_rows(t)
+    while r < nr && r < shown {
+        i = 0
+        while i < ncols {
+            w := text.visible_len(cell_at(t, t.rows[r], i, co))
+            if w > widths[i] {
+                widths[i] = w
+            }
+            i = i + 1
+        }
+        r = r + 1
+    }
+    over := overflow_rows(t)
+    if over > 0 {
+        widths = widen_row(widths, note_row(ncols, over))
+    }
+    i = 0
+    while i < ncols {
+        w := text.visible_len(cell_at(t, t.footer, i, co))
+        if w > widths[i] {
+            widths[i] = w
+        }
+        i = i + 1
+    }
+    widths
+}
+
+// Pad one cell to `width` visible columns. ANSI codes add bytes but no
+// width, so pad by the gap between visible and target.
+
+func pad_cell(s: str, width: int, mode: str) -> str {
+    v := text.visible_len(s)
+    gap := width - v
+    if gap <= 0 {
+        return s
+    }
+    if mode == "right" {
+        return str.repeat(" ", gap) + s
+    }
+    if mode == "center" {
+        left := gap / 2
+        right := gap - left
+        return str.repeat(" ", left) + s + str.repeat(" ", right)
+    }
+    s + str.repeat(" ", gap)
+}
+
+func rule_line(g: [str], pos: int, widths: [int], pad: int) -> str {
+    // pos: 0 top, 1 mid, 2 bottom
+    left := ""
+    mid := ""
+    right := ""
+    if pos == 0 {
+        left = g[0]
+        mid = g[8]
+        right = g[1]
+    } else {
+        if pos == 2 {
+            left = g[2]
+            mid = g[9]
+            right = g[3]
+        } else {
+            left = g[6]
+            mid = g[10]
+            right = g[7]
+        }
+    }
+    fill := g[4]
+    out := left
+    i := 0
+    n := len(widths)
+    while i < n {
+        seg := widths[i] + pad * 2
+        out = out + str.repeat(fill, seg)
+        if i + 1 < n {
+            out = out + mid
+        }
+        i = i + 1
+    }
+    out = out + right
+    out
+}
+
+func data_line(t: model.Table, cells: [str], widths: [int], v: str, co: int, shown: int) -> str {
+    pad := t.padding
+    gap := str.repeat(" ", pad)
+    out := v
+    i := 0
+    n := len(widths)
+    while i < n {
+        raw := cell_at(t, cells, i, co)
+        mode := resolve_align(t, i, shown)
+        out = out + gap + pad_cell(raw, widths[i], mode) + gap
+        if i + 1 < n {
+            out = out + v
+        }
+        i = i + 1
+    }
+    out = out + v
+    out
+}
+
+func inner_width(widths: [int], pad: int) -> int {
+    total := 0
+    i := 0
+    n := len(widths)
+    while i < n {
+        total = total + widths[i] + pad * 2
+        i = i + 1
+    }
+    if n > 1 {
+        total = total + (n - 1)
+    }
+    total
+}
+
+func render_framed(t: model.Table, st: str) -> str {
+    ncols := col_count(t)
+    if ncols == 0 {
+        return ""
+    }
+    co := caps_on(t)
+    widths := col_widths(t, ncols, co)
+    nr := len(t.rows)
+    shown := shown_rows(t)
+    over := overflow_rows(t)
+    has_body := shown > 0
+    has_foot := len(t.footer) > 0
+    g := theme.glyphs(st)
+    v := g[5]
+    lines:[str] = []
+    if len(t.title) > 0 {
+        w := inner_width(widths, t.padding) + 2
+        tw := text.visible_len(t.title)
+        line := text.sanitize(t.title)
+        if tw < w {
+            gap := w - tw
+            left := gap / 2
+            right := gap - left
+            line = str.repeat(" ", left) + line + str.repeat(" ", right)
+        }
+        lines = vec.push(lines, line)
+    }
+    lines = vec.push(lines, rule_line(g, 0, widths, t.padding))
+    lines = vec.push(lines, data_line(t, t.headers, widths, v, co, shown))
+    if has_body || has_foot {
+        lines = vec.push(lines, rule_line(g, 1, widths, t.padding))
+    }
+    r := 0
+    while r < nr && r < shown {
+        lines = vec.push(lines, data_line(t, t.rows[r], widths, v, co, shown))
+        if t.row_lines {
+            if r + 1 < shown || has_foot || over > 0 {
+                lines = vec.push(lines, rule_line(g, 1, widths, t.padding))
+            }
+        }
+        r = r + 1
+    }
+    if over > 0 {
+        if t.row_lines == false && shown > 0 {
+            lines = vec.push(lines, rule_line(g, 1, widths, t.padding))
+        }
+        lines = vec.push(lines, data_line(t, note_row(ncols, over), widths, v, co, shown))
+    }
+    if has_foot {
+        // Separator above the footer: row_lines mode already emitted one
+        // after the last body row, and the headers-only case is covered
+        // by the header separator. Otherwise draw it here.
+        sep_done := false
+        if t.row_lines {
+            if has_body && over == 0 {
+                sep_done = true
+            }
+        } else {
+            if has_body == false {
+                sep_done = true
+            }
+        }
+        if sep_done == false {
+            lines = vec.push(lines, rule_line(g, 1, widths, t.padding))
+        }
+        lines = vec.push(lines, data_line(t, t.footer, widths, v, co, shown))
+    }
+    lines = vec.push(lines, rule_line(g, 2, widths, t.padding))
+    vec.join(lines, "\n") + "\n"
+}
+
+func render_markdown(t: model.Table) -> str {
+    ncols := col_count(t)
+    if ncols == 0 {
+        return ""
+    }
+    co := caps_on(t)
+    widths := col_widths(t, ncols, co)
+    shown := shown_rows(t)
+    over := overflow_rows(t)
+    // Markdown needs at least 3 dashes per column — widen narrow
+    // columns so header, separator, and rows share one width.
+    i := 0
+    while i < ncols {
+        if widths[i] < 3 {
+            widths[i] = 3
+        }
+        i = i + 1
+    }
+    lines:[str] = []
+    if len(t.title) > 0 {
+        lines = vec.push(lines, "# " + text.sanitize(t.title))
+    }
+    header := "|"
+    sep := "|"
+    i = 0
+    while i < ncols {
+        raw := cell_at(t, t.headers, i, co)
+        mode := resolve_align(t, i, shown)
+        header = header + " " + pad_cell(raw, widths[i], mode) + " |"
+        dashes := widths[i]
+        mark := str.repeat("-", dashes)
+        if mode == "right" {
+            mark = str.repeat("-", dashes - 1) + ":"
+        } else {
+            if mode == "center" {
+                mark = ":" + str.repeat("-", dashes - 2) + ":"
+            }
+        }
+        sep = sep + " " + mark + " |"
+        i = i + 1
+    }
+    lines = vec.push(lines, header)
+    lines = vec.push(lines, sep)
+    nr := len(t.rows)
+    shown := shown_rows(t)
+    over := overflow_rows(t)
+    r := 0
+    while r < nr && r < shown {
+        row := "|"
+        i = 0
+        while i < ncols {
+            raw := cell_at(t, t.rows[r], i, co)
+            mode := resolve_align(t, i, shown)
+            row = row + " " + pad_cell(raw, widths[i], mode) + " |"
+            i = i + 1
+        }
+        lines = vec.push(lines, row)
+        r = r + 1
+    }
+    if over > 0 {
+        note := note_row(ncols, over)
+        row := "|"
+        i = 0
+        while i < ncols {
+            raw := cell_at(t, note, i, co)
+            mode := resolve_align(t, i, shown)
+            row = row + " " + pad_cell(raw, widths[i], mode) + " |"
+            i = i + 1
+        }
+        lines = vec.push(lines, row)
+    }
+    if len(t.footer) > 0 {
+        row := "|"
+        i = 0
+        while i < ncols {
+            raw := cell_at(t, t.footer, i, co)
+            mode := resolve_align(t, i, shown)
+            row = row + " " + pad_cell(raw, widths[i], mode) + " |"
+            i = i + 1
+        }
+        lines = vec.push(lines, row)
+    }
+    vec.join(lines, "\n") + "\n"
+}
+
+func render_minimal(t: model.Table) -> str {
+    ncols := col_count(t)
+    if ncols == 0 {
+        return ""
+    }
+    co := caps_on(t)
+    widths := col_widths(t, ncols, co)
+    shown := shown_rows(t)
+    over := overflow_rows(t)
+    lines:[str] = []
+    if len(t.title) > 0 {
+        lines = vec.push(lines, text.sanitize(t.title))
+    }
+    gap2 := "  "
+    header := ""
+    i := 0
+    while i < ncols {
+        raw := cell_at(t, t.headers, i, co)
+        mode := resolve_align(t, i, shown)
+        header = header + pad_cell(raw, widths[i], mode)
+        if i + 1 < ncols {
+            header = header + gap2
+        }
+        i = i + 1
+    }
+    lines = vec.push(lines, header)
+    rule := ""
+    i = 0
+    while i < ncols {
+        rule = rule + str.repeat("─", widths[i])
+        if i + 1 < ncols {
+            rule = rule + gap2
+        }
+        i = i + 1
+    }
+    lines = vec.push(lines, rule)
+    r := 0
+    nr := len(t.rows)
+    while r < nr && r < shown {
+        row := ""
+        i = 0
+        while i < ncols {
+            raw := cell_at(t, t.rows[r], i, co)
+            mode := resolve_align(t, i, shown)
+            row = row + pad_cell(raw, widths[i], mode)
+            if i + 1 < ncols {
+                row = row + gap2
+            }
+            i = i + 1
+        }
+        lines = vec.push(lines, row)
+        r = r + 1
+    }
+    if over > 0 {
+        note := note_row(ncols, over)
+        row := ""
+        i = 0
+        while i < ncols {
+            raw := cell_at(t, note, i, co)
+            mode := resolve_align(t, i, shown)
+            row = row + pad_cell(raw, widths[i], mode)
+            if i + 1 < ncols {
+                row = row + gap2
+            }
+            i = i + 1
+        }
+        lines = vec.push(lines, row)
+    }
+    if len(t.footer) > 0 {
+        lines = vec.push(lines, rule)
+        row := ""
+        i = 0
+        while i < ncols {
+            raw := cell_at(t, t.footer, i, co)
+            mode := resolve_align(t, i, shown)
+            row = row + pad_cell(raw, widths[i], mode)
+            if i + 1 < ncols {
+                row = row + gap2
+            }
+            i = i + 1
+        }
+        lines = vec.push(lines, row)
+    }
+    vec.join(lines, "\n") + "\n"
+}
