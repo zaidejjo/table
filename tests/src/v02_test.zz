@@ -104,3 +104,12 @@ func test_pipeline_fluent_style() {
     assert(got.contains("22"))
     assert(got.contains("T"))
 }
+
+@test
+func test_dotted_chaining_style() {
+    // Dotted chains need a post-0.1.6 toolchain natively (method
+    // dispatch fix); VM has always accepted them. zz test is VM-only.
+    got := table.render(table.new(["A"]).add_row(["1"]).set_title("T"))
+    assert(got.contains("1"))
+    assert(got.contains("T"))
+}

@@ -37,10 +37,10 @@ t := table.new(["NAME", "AGE"])
 ```
 
 (Dotted chaining like `t.add_row(..).set_title(..)` parses and runs
-on the VM, but method dispatch on structs corrupts memory in native
-builds — a compiler bug, reported upstream. Prefer pipelines until
-it lands. Plain `t = table.add_row(t, …)` rebinding keeps working
-everywhere.)
+on the VM. It needs a post-0.1.6 toolchain natively (method-dispatch
+fixes landed in dev after 0.1.6); until your `zz` ships them, prefer
+pipelines for anything that runs native. Plain
+`t = table.add_row(t, …)` rebinding keeps working everywhere.)
 See `examples/demo.zz` (`cd examples && zz install && zz run demo.zz`).
 
 ## One-liner
