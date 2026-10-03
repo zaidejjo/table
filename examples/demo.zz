@@ -5,26 +5,40 @@ import std.colors
 import table
 
 func main() {
-    // Basic rounded table (default style).
-    t := table.new(["NAME", "AGE", "CITY"])
-    t = table.add_row(t, ["Alice", "25", "New York"])
-    t = table.add_row(t, ["Bob", "30", "Boston"])
-    t = table.set_align(t, 1, "right")
-    println(table.render(t))
+    // Pipeline style: one binding, no rebind chain.
+    table.new(["NAME", "AGE", "CITY"])
+        |> table.add_row(["Alice", "25", "New York"])
+        |> table.add_row(["Bob", "30", "Boston"])
+        |> table.set_align(1, "right")
+        |> table.render()
+        |> println()
     // Title + footer (totals).
-    u := table.new(["ITEM", "QTY"])
-    u = table.add_row(u, ["apples", "10"])
-    u = table.add_row(u, ["oranges", "4"])
-    u = table.set_title(u, "Stock")
-    u = table.set_footer(u, ["Total", "14"])
-    table.print(u)
+    table.new(["ITEM", "QTY"])
+        |> table.add_row(["apples", "10"])
+        |> table.add_row(["oranges", "4"])
+        |> table.set_title("Stock")
+        |> table.set_footer(["Total", "14"])
+        |> table.print()
     // Colors compose freely — widths stay aligned.
-    c := table.new([colors.bold("NAME"), colors.bold("AGE")])
-    c = table.add_row(c, ["Alice", colors.green("25")])
-    c = table.add_row(c, ["Bob", colors.red("30")])
-    table.print(c)
+    table.new([colors.bold("NAME"), colors.bold("AGE")])
+        |> table.add_row(["Alice", colors.green("25")])
+        |> table.add_row(["Bob", colors.red("30")])
+        |> table.print()
+    // Long cells truncate cleanly instead of stretching the column.
+    table.new(["NOTE"])
+        |> table.add_row(["a very long note that would stretch the table"])
+        |> table.set_max_width(20)
+        |> table.render()
+        |> println()
+    // JSON straight into a table.
+    table.from_json(["id", "name"], "[{\"id\": 1, \"name\": \"ada\"}]")
+        |> table.render()
+        |> println()
     // Markdown output for docs and issues.
-    m := table.set_style(t, "markdown")
-    println(table.render(m))
+    table.new(["NAME", "AGE"])
+        |> table.add_row(["Alice", "25"])
+        |> table.set_style("markdown")
+        |> table.render()
+        |> println()
     println("demo_ok")
 }

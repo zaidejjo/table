@@ -34,9 +34,12 @@
 // "markdown", "minimal", "ascii". Unknown names fall back to rounded.
 // Aligns: "left" (default), "center", "right" — per column.
 //
-// Performance: single width pass (O(cells)), one allocation per line,
-// `str.repeat` doubling for rules. No regex, no I/O, no globals.
+// Performance: one width pass (O(cells)) plus one output pass, no
+// per-row accumulation structures. Truncation caps resolve to a
+// single hoisted on/off flag per render, so the common uncapped path
+// adds one integer compare per cell. No regex, no I/O, no globals.
 
+import std.json
 import std.str
 import std.vec
 
@@ -50,6 +53,8 @@ pub struct Table {
     rows: [[str]],
     aligns: [str],
     def_align: str,
+    col_caps: [int],
+    max_width: int,
     style: str,
     padding: int,
     title: str,
@@ -61,13 +66,15 @@ pub struct Table {
 
 pub func new(headers: [str]) -> Table {
     aligns:[str] = []
+    caps:[int] = []
     i := 0
     n := len(headers)
     while i < n {
         aligns = vec.push(aligns, "left")
+        caps = vec.push(caps, 0)
         i = i + 1
     }
-    Table{headers: headers, rows: [], aligns: aligns, def_align: "left", style: "rounded", padding: 1, title: "", footer: [], row_lines: false}
+    Table{headers: headers, rows: [], aligns: aligns, def_align: "left", col_caps: caps, max_width: 0, style: "rounded", padding: 1, title: "", footer: [], row_lines: false}
 }
 
 /// Create a table from headers plus all rows at once.
@@ -89,12 +96,13 @@ pub func simple(headers: [str], rows: [[str]]) -> str {
 
 pub func add_row(t: Table, row: [str]) -> Table {
     t.rows = vec.push(t.rows, row)
-    // Keep aligns as long as the widest row seen so far. Late columns
-    // inherit the sticky default from set_align_all.
+    // Keep aligns/caps as long as the widest row seen so far. Late
+    // columns inherit the sticky default from set_align_all.
     i := len(t.aligns)
     m := len(row)
     while i < m {
         t.aligns = vec.push(t.aligns, t.def_align)
+        t.col_caps = vec.push(t.col_caps, 0)
         i = i + 1
     }
     t
@@ -148,6 +156,114 @@ pub func column<T>(rows: [T], f: func(T) -> str) -> [str] {
         i = i + 1
     }
     out
+}
+
+/// Build from a JSON document: array-of-arrays (cells in order) or
+/// array-of-objects (columns picked in `headers` order, missing keys
+/// render blank). Scalars convert naturally (numbers keep their text,
+/// booleans print true/false, null and nesting render blank). Total:
+/// invalid JSON or a non-array document yields a headers-only table.
+///
+///   table.from_json(["ID", "NAME"], "[{\"id\": 1, \"name\": \"a\"}]")
+
+pub func from_json(headers: [str], text: str) -> Table {
+    t := new(headers)
+    match json.parse(text) {
+        .ok(doc) => fill_json(t, doc)
+        .err(_) => t
+    }
+}
+
+func fill_json(t: Table, doc: json) -> Table {
+    if json.type(doc) != "array" {
+        return t
+    }
+    n := json.len(doc)
+    i := 0
+    first:int = 1
+    while i < n {
+        if let .ok(item) = json.get(doc, str(i)) {
+            if first == 1 && len(t.headers) == 0 && json.type(item) == "object" {
+                t.headers = json.keys(item)
+                t = sync_spans(t)
+            }
+            t = add_json_row(t, item)
+            first = 0
+        }
+        i = i + 1
+    }
+    t
+}
+
+// Grow aligns/caps to match headers set after construction (used when
+// from_json derives headers from the first object's keys).
+
+func sync_spans(t: Table) -> Table {
+    i := len(t.aligns)
+    m := len(t.headers)
+    while i < m {
+        t.aligns = vec.push(t.aligns, t.def_align)
+        t.col_caps = vec.push(t.col_caps, 0)
+        i = i + 1
+    }
+    t
+}
+
+func add_json_row(t: Table, item: json) -> Table {
+    kind := json.type(item)
+    row:[str] = []
+    if kind == "array" {
+        row = []
+        m := json.len(item)
+        j := 0
+        while j < m {
+            match json.get(item, str(j)) {
+                .ok(v) => {
+                    row = vec.push(row, json_cell(v))
+                }
+                .err(_) => {
+                    row = vec.push(row, "")
+                }
+            }
+            j = j + 1
+        }
+        return add_row(t, row)
+    }
+    if kind == "object" {
+        row = []
+        h := 0
+        nh := len(t.headers)
+        while h < nh {
+            match json.get(item, t.headers[h]) {
+                .ok(v) => {
+                    row = vec.push(row, json_cell(v))
+                }
+                .err(_) => {
+                    row = vec.push(row, "")
+                }
+            }
+            h = h + 1
+        }
+        return add_row(t, row)
+    }
+    t
+}
+
+func json_cell(v: json) -> str {
+    k := json.type(v)
+    if k == "string" {
+        return json.as_str(v)
+    }
+    if k == "number" {
+        return json.stringify(v) ?? ""
+    }
+    if k == "bool" {
+        if json.as_bool(v) {
+            return "true"
+        }
+        return "false"
+    }
+    ""
 }
 
 /// Build by transposing columns into rows. Short columns pad with "";
@@ -252,8 +368,40 @@ pub func set_footer(t: Table, footer: [str]) -> Table {
     m := len(footer)
     while i < m {
         t.aligns = vec.push(t.aligns, t.def_align)
+        t.col_caps = vec.push(t.col_caps, 0)
         i = i + 1
     }
+    t
+}
+
+/// Cap every column's visible width. Cells longer than `n` render
+/// truncated with a trailing `…`. `0` (default) means unlimited.
+/// Negative values are treated as `0`.
+
+pub func set_max_width(t: Table, n: int) -> Table {
+    m := n
+    if m < 0 {
+        m = 0
+    }
+    t.max_width = m
+    t
+}
+
+/// Cap one column's visible width (overrides `set_max_width` for that
+/// column). Out-of-range columns are ignored. `0` clears the cap.
+
+pub func set_col_max_width(t: Table, col: int, n: int) -> Table {
+    if col < 0 {
+        return t
+    }
+    if col >= len(t.col_caps) {
+        return t
+    }
+    m := n
+    if m < 0 {
+        m = 0
+    }
+    t.col_caps[col] = m
     t
 }
 
@@ -368,14 +516,52 @@ func sanitize(s: str) -> str {
     r
 }
 
-func cell_at(row: [str], i: int) -> str {
+func cell_at(t: Table, row: [str], i: int, capson: int) -> str {
     if i < 0 {
         return ""
     }
     if i >= len(row) {
         return ""
     }
-    sanitize(row[i])
+    s := sanitize(row[i])
+    // Truncation caps. The on/off check is hoisted to callers (once per
+    // row, not per cell): a debug-VM call costs ~1ms, and this runs per
+    // cell. Per-column cap wins, otherwise the global max.
+    if capson == 0 {
+        return s
+    }
+    cap := t.max_width
+    if i < len(t.col_caps) {
+        c := t.col_caps[i]
+        if c > 0 {
+            cap = c
+        }
+    }
+    if cap <= 0 {
+        return s
+    }
+    if visible_len(s) <= cap {
+        return s
+    }
+    truncate_ansi(s, cap)
+}
+
+// 1 when any cap is set (global or per-column), else 0. Computed once
+// per render and threaded through cell_at.
+
+func caps_on(t: Table) -> int {
+    if t.max_width > 0 {
+        return 1
+    }
+    i := 0
+    n := len(t.col_caps)
+    while i < n {
+        if t.col_caps[i] > 0 {
+            return 1
+        }
+        i = i + 1
+    }
+    0
 }
 
 func align_at(t: Table, i: int) -> str {
@@ -406,7 +592,56 @@ func col_count(t: Table) -> int {
     n
 }
 
-func col_widths(t: Table, ncols: int) -> [int] {
+// Truncate to `max` visible columns: keep `max - 1` visible chars plus
+// a trailing `…` (total width is exactly `max`). ANSI `\e[...m`
+// sequences pass through untouched, and a closing reset is appended
+// when the input carried styling so colors never bleed. Callers only
+// invoke this when `visible_len(s) > max`, with `max >= 1`.
+
+func truncate_ansi(s: str, max: int) -> str {
+    chars := str.split(s, "")
+    out := ""
+    vis := 0
+    esc := 0
+    saw:int = 0
+    limit := max - 1
+    i := 0
+    total := len(chars)
+    c := ""
+    while i < total {
+        c = chars[i]
+        if c == "\e" {
+            esc = 1
+            saw = 1
+            out = out + c
+        } else {
+            if esc == 1 {
+                out = out + c
+                if c == "m" {
+                    esc = 0
+                }
+            } else {
+                if c != "" && vis < limit {
+                    out = out + c
+                    vis = vis + 1
+                }
+            }
+        }
+        i = i + 1
+    }
+    out = out + "…"
+    if saw == 1 {
+        out = out + "\e[0m"
+    }
+    out
+}
+
+// Column widths: max visible length over headers, rows, and footer.
+// Cells arrive sanitized and truncated via cell_at, so widths match
+// exactly what data_line prints. Widths are computed once per render
+// and reused for rules, padding, and title centering.
+
+func col_widths(t: Table, ncols: int, co: int) -> [int] {
     widths:[int] = []
     i := 0
     while i < ncols {
@@ -415,7 +650,7 @@ func col_widths(t: Table, ncols: int) -> [int] {
     }
     i = 0
     while i < ncols {
-        w := visible_len(cell_at(t.headers, i))
+        w := visible_len(cell_at(t, t.headers, i, co))
         if w > widths[i] {
             widths[i] = w
         }
@@ -426,7 +661,7 @@ func col_widths(t: Table, ncols: int) -> [int] {
     while r < nr {
         i = 0
         while i < ncols {
-            w := visible_len(cell_at(t.rows[r], i))
+            w := visible_len(cell_at(t, t.rows[r], i, co))
             if w > widths[i] {
                 widths[i] = w
             }
@@ -436,7 +671,7 @@ func col_widths(t: Table, ncols: int) -> [int] {
     }
     i = 0
     while i < ncols {
-        w := visible_len(cell_at(t.footer, i))
+        w := visible_len(cell_at(t, t.footer, i, co))
         if w > widths[i] {
             widths[i] = w
         }
@@ -519,14 +754,14 @@ func rule_line(g: [str], pos: int, widths: [int], pad: int) -> str {
     out
 }
 
-func data_line(t: Table, cells: [str], widths: [int], v: str) -> str {
+func data_line(t: Table, cells: [str], widths: [int], v: str, co: int) -> str {
     pad := t.padding
     gap := str.repeat(" ", pad)
     out := v
     i := 0
     n := len(widths)
     while i < n {
-        raw := cell_at(cells, i)
+        raw := cell_at(t, cells, i, co)
         mode := align_at(t, i)
         out = out + gap + pad_cell(raw, widths[i], mode) + gap
         if i + 1 < n {
@@ -557,7 +792,11 @@ func render_framed(t: Table, st: str) -> str {
     if ncols == 0 {
         return ""
     }
-    widths := col_widths(t, ncols)
+    co := caps_on(t)
+    widths := col_widths(t, ncols, co)
+    nr := len(t.rows)
+    has_body := nr > 0
+    has_foot := len(t.footer) > 0
     g := glyphs(st)
     v := g[5]
     lines:[str] = []
@@ -574,16 +813,13 @@ func render_framed(t: Table, st: str) -> str {
         lines = vec.push(lines, line)
     }
     lines = vec.push(lines, rule_line(g, 0, widths, t.padding))
-    lines = vec.push(lines, data_line(t, t.headers, widths, v))
-    has_body := len(t.rows) > 0
-    has_foot := len(t.footer) > 0
+    lines = vec.push(lines, data_line(t, t.headers, widths, v, co))
     if has_body || has_foot {
         lines = vec.push(lines, rule_line(g, 1, widths, t.padding))
     }
     r := 0
-    nr := len(t.rows)
     while r < nr {
-        lines = vec.push(lines, data_line(t, t.rows[r], widths, v))
+        lines = vec.push(lines, data_line(t, t.rows[r], widths, v, co))
         if t.row_lines {
             if r + 1 < nr || has_foot {
                 lines = vec.push(lines, rule_line(g, 1, widths, t.padding))
@@ -608,7 +844,7 @@ func render_framed(t: Table, st: str) -> str {
         if sep_done == false {
             lines = vec.push(lines, rule_line(g, 1, widths, t.padding))
         }
-        lines = vec.push(lines, data_line(t, t.footer, widths, v))
+        lines = vec.push(lines, data_line(t, t.footer, widths, v, co))
     }
     lines = vec.push(lines, rule_line(g, 2, widths, t.padding))
     vec.join(lines, "\n") + "\n"
@@ -619,7 +855,8 @@ func render_markdown(t: Table) -> str {
     if ncols == 0 {
         return ""
     }
-    widths := col_widths(t, ncols)
+    co := caps_on(t)
+    widths := col_widths(t, ncols, co)
     // Markdown needs at least 3 dashes per column — widen narrow
     // columns so header, separator, and rows share one width.
     i := 0
@@ -637,7 +874,7 @@ func render_markdown(t: Table) -> str {
     sep := "|"
     i = 0
     while i < ncols {
-        raw := cell_at(t.headers, i)
+        raw := cell_at(t, t.headers, i, co)
         mode := align_at(t, i)
         header = header + " " + pad_cell(raw, widths[i], mode) + " |"
         dashes := widths[i]
@@ -654,13 +891,13 @@ func render_markdown(t: Table) -> str {
     }
     lines = vec.push(lines, header)
     lines = vec.push(lines, sep)
-    r := 0
     nr := len(t.rows)
+    r := 0
     while r < nr {
         row := "|"
         i = 0
         while i < ncols {
-            raw := cell_at(t.rows[r], i)
+            raw := cell_at(t, t.rows[r], i, co)
             mode := align_at(t, i)
             row = row + " " + pad_cell(raw, widths[i], mode) + " |"
             i = i + 1
@@ -672,7 +909,7 @@ func render_markdown(t: Table) -> str {
         row := "|"
         i = 0
         while i < ncols {
-            raw := cell_at(t.footer, i)
+            raw := cell_at(t, t.footer, i, co)
             mode := align_at(t, i)
             row = row + " " + pad_cell(raw, widths[i], mode) + " |"
             i = i + 1
@@ -687,7 +924,8 @@ func render_minimal(t: Table) -> str {
     if ncols == 0 {
         return ""
     }
-    widths := col_widths(t, ncols)
+    co := caps_on(t)
+    widths := col_widths(t, ncols, co)
     lines:[str] = []
     if len(t.title) > 0 {
         lines = vec.push(lines, sanitize(t.title))
@@ -696,7 +934,7 @@ func render_minimal(t: Table) -> str {
     header := ""
     i := 0
     while i < ncols {
-        raw := cell_at(t.headers, i)
+        raw := cell_at(t, t.headers, i, co)
         mode := align_at(t, i)
         header = header + pad_cell(raw, widths[i], mode)
         if i + 1 < ncols {
@@ -721,7 +959,7 @@ func render_minimal(t: Table) -> str {
         row := ""
         i = 0
         while i < ncols {
-            raw := cell_at(t.rows[r], i)
+            raw := cell_at(t, t.rows[r], i, co)
             mode := align_at(t, i)
             row = row + pad_cell(raw, widths[i], mode)
             if i + 1 < ncols {
@@ -737,7 +975,7 @@ func render_minimal(t: Table) -> str {
         row := ""
         i = 0
         while i < ncols {
-            raw := cell_at(t.footer, i)
+            raw := cell_at(t, t.footer, i, co)
             mode := align_at(t, i)
             row = row + pad_cell(raw, widths[i], mode)
             if i + 1 < ncols {

@@ -10,10 +10,11 @@ zz add table
 import table
 
 func main() {
-    t := table.new(["NAME", "AGE"])
-    t = table.add_row(t, ["Alice", "25"])
-    t = table.add_row(t, ["Bob", "30"])
-    println(table.render(t))
+    table.new(["NAME", "AGE"])
+        |> table.add_row(["Alice", "25"])
+        |> table.add_row(["Bob", "30"])
+        |> table.render()
+        |> println()
 }
 ```
 
@@ -26,8 +27,20 @@ func main() {
 ╰───────┴─────╯
 ```
 
-The builder is a plain value: every call hands back the next state,
-so re-bind it (`t = table.add_row(t, …)`) on each step.
+The builder is a plain value. The idiomatic style is a `|>` pipeline
+with a single binding — no rebind chain, no mutation to forget:
+
+```zz
+t := table.new(["NAME", "AGE"])
+    |> table.add_row(["Alice", "25"])
+    |> table.set_title("Users")
+```
+
+(Dotted chaining like `t.add_row(..).set_title(..)` parses and runs
+on the VM, but method dispatch on structs corrupts memory in native
+builds — a compiler bug, reported upstream. Prefer pipelines until
+it lands. Plain `t = table.add_row(t, …)` rebinding keeps working
+everywhere.)
 See `examples/demo.zz` (`cd examples && zz install && zz run demo.zz`).
 
 ## One-liner
@@ -98,6 +111,8 @@ table.print(t) // render + println in one call
   column, then transpose (short columns pad with `""`).
 - `set_style` / `set_align` / `set_align_all` / `set_padding` /
   `set_title` / `set_footer` / `set_row_lines` — builders above.
+- `set_max_width` / `set_col_max_width` — truncation caps (`0` = off).
+- `from_json(headers, text)` — JSON array-of-arrays / array-of-objects.
 - `render(t)` — string (trailing newline included).
 - `print(t)` — `println(render(t))`.
 - `styles()` — the seven style names.
@@ -139,11 +154,38 @@ t := table.from_cols(["ID", "NAME"], [ids, names])
 See `examples/sqlz_demo.zz` (`cd examples && zz install && zz run
 sqlz_demo.zz`) for filter-then-display pipelines.
 
+## Truncation
+
+```zz
+t = table.set_max_width(t, 20)      // every column, 0 = off (default)
+t = table.set_col_max_width(t, 2, 12) // one column, overrides global
+```
+
+Overlong cells truncate to a clean `…` (`"a very long…"`), ANSI-safe:
+colors survive truncation and a reset is re-appended, so styling
+never bleeds into borders. Widths, padding, and alignment all use the
+post-truncation size.
+
+## JSON
+
+```zz
+t := table.from_json(["id", "name"], "[{\"id\": 1, \"name\": \"a\"}]")
+```
+
+Array-of-arrays keep cell order; array-of-objects pick columns in
+`headers` order (missing keys render blank, pass `[]` to derive
+headers from the first object's keys). Numbers keep their text,
+booleans print true/false, null and nesting render blank. Total:
+invalid JSON yields a headers-only table, never an error.
+
 ## Tests
 
-`zz test` runs 21 checks: golden rounded output, per-column
+`zz test` runs 32 checks: golden rounded output, per-column
 alignment (incl. sticky `set_align_all`), footer separator, title,
 all seven glyph sets, fallback paths, uneven rows, empty tables,
 newline folding, ANSI-safe widths, bulk APIs, row lines, padding
-clamps, plus five `std.sqlz` bridge checks (struct rows, `|>`
-pipelines, unannotated rows, `column`/`from_cols`, empty results).
+clamps, five `std.sqlz` bridge checks (struct rows, `|>` pipelines,
+unannotated rows, `column`/`from_cols`, empty results), plus eleven
+v0.2.0 checks (truncation goldens, per-column caps, colored
+truncation without bleed, markdown/minimal truncation, JSON shapes,
+derived headers, invalid-JSON empties, pipeline fluency).

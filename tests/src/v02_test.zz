@@ -1,0 +1,106 @@
+// v02_test.zz — max-width truncation, per-column caps, from_json.
+import std.colors
+
+import table
+
+@test
+func test_max_width_truncates() {
+    t := table.new(["NAME"])
+    t = table.add_row(t, ["alexander"])
+    t = table.set_max_width(t, 5)
+    got := table.render(t)
+    want := "╭───────╮\n│ NAME  │\n├───────┤\n│ alex… │\n╰───────╯\n"
+    assert_eq(got, want)
+}
+
+@test
+func test_max_width_short_cells_untouched() {
+    t := table.new(["A"])
+    t = table.add_row(t, ["xy"])
+    t = table.set_max_width(t, 10)
+    assert_eq(table.render(t), "╭────╮\n│ A  │\n├────┤\n│ xy │\n╰────╯\n")
+}
+
+@test
+func test_col_cap_overrides_global() {
+    t := table.new(["A", "B"])
+    t = table.add_row(t, ["aaaaaa", "bbbbbb"])
+    t = table.set_max_width(t, 4)
+    t = table.set_col_max_width(t, 1, 6)
+    got := table.render(t)
+    assert(got.contains("aaa…"))
+    assert(got.contains("bbbbbb"))
+}
+
+@test
+func test_col_cap_bad_index_ignored() {
+    t := table.new(["A"])
+    t = table.add_row(t, ["abc"])
+    t = table.set_col_max_width(t, 9, 1)
+    t = table.set_max_width(t, 0 - 5)
+    assert(table.render(t).contains("abc"))
+}
+
+@test
+func test_truncate_colored_no_bleed() {
+    t := table.new(["A"])
+    t = table.add_row(t, [colors.green("abcdef")])
+    t = table.set_max_width(t, 4)
+    got := table.render(t)
+    assert_eq(table.visible_len(got.split("\n")[3]), 8)
+    assert(got.contains("…"))
+}
+
+@test
+func test_truncate_applies_markdown_minimal() {
+    t := table.new(["A"])
+    t = table.add_row(t, ["abcdef"])
+    t = table.set_max_width(t, 3)
+    md := table.render(table.set_style(t, "markdown"))
+    assert(md.contains("ab…"))
+    mn := table.render(table.set_style(t, "minimal"))
+    assert(mn.contains("ab…"))
+}
+
+@test
+func test_from_json_arrays() {
+    t := table.from_json(["A", "B"], "[[\"x\", 1], [\"yy\", true]]")
+    got := table.render(t)
+    assert(got.contains("x"))
+    assert(got.contains("yy"))
+    assert(got.contains("true"))
+}
+
+@test
+func test_from_json_objects() {
+    t := table.from_json(["id", "name"], "[{\"id\": 1, \"name\": \"a\"}, {\"id\": 2}]")
+    got := table.render(t)
+    assert(got.contains("2"))
+    assert(got.contains("a"))
+}
+
+@test
+func test_from_json_derives_headers() {
+    t := table.from_json([], "[{\"id\": 1}]")
+    assert(table.render(t).contains("id"))
+}
+
+@test
+func test_from_json_invalid_is_empty() {
+    t := table.from_json(["A"], "nope{")
+    assert_eq(table.render(t), "╭───╮\n│ A │\n╰───╯\n")
+    t2 := table.from_json(["A"], "{\"a\": 1}")
+    assert_eq(table.render(t2), "╭───╮\n│ A │\n╰───╯\n")
+}
+
+@test
+func test_pipeline_fluent_style() {
+    t := table.new(["A", "B"])
+        |> table.add_row(["1", "22"])
+        |> table.set_align(1, "right")
+        |> table.set_title("T")
+        |> table.set_max_width(10)
+    got := table.render(t)
+    assert(got.contains("22"))
+    assert(got.contains("T"))
+}
