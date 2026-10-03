@@ -39,9 +39,10 @@ pub func print(t: model.Table) {
 
 func col_is_numeric(t: model.Table, i: int, shown: int) -> bool {
     seen:int = 0
-    r := 0
+    r := win_start(t)
+    end := r + shown
     nr := len(t.rows)
-    while r < nr && r < shown {
+    while r < nr && r < end {
         if i >= 0 && i < len(t.rows[r]) {
             c := text.sanitize(t.rows[r][i])
             if c != "" {
@@ -142,6 +143,17 @@ func resolve_align(t: model.Table, i: int, shown: int) -> str {
     "left"
 }
 
+// Header alignment: explicit modes win, "auto" (default) follows the
+// column so headers match their body.
+
+func resolve_header_align(t: model.Table, i: int, shown: int) -> str {
+    m := theme.align_name(t.header_align)
+    if m != "auto" {
+        return m
+    }
+    resolve_align(t, i, shown)
+}
+
 func col_count(t: model.Table) -> int {
     n := len(t.headers)
     i := 0
@@ -160,24 +172,39 @@ func col_count(t: model.Table) -> int {
     n
 }
 
-// Visible body rows under `max_rows` (all rows when capped off).
+// First visible body row under `row_offset`, clamped into range.
+// Past-the-end yields `len(rows)`: an empty window, never a panic.
+
+func win_start(t: model.Table) -> int {
+    nr := len(t.rows)
+    s := t.row_offset
+    if s < 0 {
+        s = 0
+    }
+    if s > nr {
+        s = nr
+    }
+    s
+}
+
+// Visible body rows: the window past the offset, capped by `max_rows`
+// (all remaining rows when capped off).
 
 func shown_rows(t: model.Table) -> int {
     nr := len(t.rows)
-    if t.max_rows > 0 && nr > t.max_rows {
+    start := win_start(t)
+    avail := nr - start
+    if t.max_rows > 0 && avail > t.max_rows {
         return t.max_rows
     }
-    nr
+    avail
 }
 
-// Hidden body rows under `max_rows` (0 when capped off or fitting).
+// Hidden body rows, above plus below the window (`0` when everything
+// fits). The trailing note reports this total.
 
 func overflow_rows(t: model.Table) -> int {
-    nr := len(t.rows)
-    if t.max_rows > 0 && nr > t.max_rows {
-        return nr - t.max_rows
-    }
-    0
+    len(t.rows) - shown_rows(t)
 }
 
 // The `… +N more` note row, padded to `ncols` with blanks.
@@ -206,10 +233,11 @@ func widen_row(widths: [int], cells: [str]) -> [int] {
     widths
 }
 
-// Column widths: max visible length over headers, shown rows, note,
-// and footer. Cells arrive sanitized and truncated via cell_at, so
-// widths match exactly what data_line prints. Computed once per
-// render and reused for rules, padding, and title centering.
+// Column widths: max visible length over headers, the shown window,
+// note, and footer. Hidden rows never stretch columns. Cells arrive
+// sanitized and truncated via cell_at, so widths match exactly what
+// data_line prints. Computed once per render and reused for rules,
+// padding, and title centering.
 
 func col_widths(t: model.Table, ncols: int, co: int) -> [int] {
     widths:[int] = []
@@ -226,10 +254,11 @@ func col_widths(t: model.Table, ncols: int, co: int) -> [int] {
         }
         i = i + 1
     }
-    r := 0
+    r := win_start(t)
     nr := len(t.rows)
     shown := shown_rows(t)
-    while r < nr && r < shown {
+    end := r + shown
+    while r < nr && r < end {
         i = 0
         while i < ncols {
             w := text.visible_len(cell_at(t, t.rows[r], i, co))
@@ -275,24 +304,33 @@ func pad_cell(s: str, width: int, mode: str) -> str {
     s + str.repeat(" ", gap)
 }
 
-func rule_line(g: [str], pos: int, widths: [int], pad: int) -> str {
-    // pos: 0 top, 1 mid, 2 bottom
+func rule_line(g: [str], pos: int, widths: [int], pad: int, edge: int) -> str {
+    // pos: 0 top, 1 mid, 2 bottom. edge 0 drops the outer
+    // corners for borderless output; inner joints stay.
     left := ""
     mid := ""
     right := ""
+    if edge == 1 {
+        if pos == 0 {
+            left = g[0]
+            right = g[1]
+        } else {
+            if pos == 2 {
+                left = g[2]
+                right = g[3]
+            } else {
+                left = g[6]
+                right = g[7]
+            }
+        }
+    }
     if pos == 0 {
-        left = g[0]
         mid = g[8]
-        right = g[1]
     } else {
         if pos == 2 {
-            left = g[2]
             mid = g[9]
-            right = g[3]
         } else {
-            left = g[6]
             mid = g[10]
-            right = g[7]
         }
     }
     fill := g[4]
@@ -330,6 +368,37 @@ func data_line(t: model.Table, cells: [str], widths: [int], v: str, co: int, sho
     out
 }
 
+// Header variant of data_line: same geometry, but header alignment
+// wins over column alignment.
+
+func header_line(t: model.Table, widths: [int], v: str, co: int, shown: int) -> str {
+    pad := t.padding
+    gap := str.repeat(" ", pad)
+    out := v
+    i := 0
+    n := len(widths)
+    while i < n {
+        raw := cell_at(t, t.headers, i, co)
+        mode := resolve_header_align(t, i, shown)
+        out = out + gap + pad_cell(raw, widths[i], mode) + gap
+        if i + 1 < n {
+            out = out + v
+        }
+        i = i + 1
+    }
+    out = out + v
+    out
+}
+
+// Sanitized caption text, or "" when no caption is set.
+
+func caption_line(t: model.Table) -> str {
+    if len(t.caption) == 0 {
+        return ""
+    }
+    text.sanitize(t.caption)
+}
+
 func inner_width(widths: [int], pad: int) -> int {
     total := 0
     i := 0
@@ -356,11 +425,18 @@ func render_framed(t: model.Table, st: str) -> str {
     over := overflow_rows(t)
     has_body := shown > 0
     has_foot := len(t.footer) > 0
+    edge := 1
+    if t.outer_border == false {
+        edge = 0
+    }
     g := theme.glyphs(st)
     v := g[5]
+    if edge == 0 {
+        v = ""
+    }
     lines:[str] = []
     if len(t.title) > 0 {
-        w := inner_width(widths, t.padding) + 2
+        w := inner_width(widths, t.padding) + edge * 2
         tw := text.visible_len(t.title)
         line := text.sanitize(t.title)
         if tw < w {
@@ -371,24 +447,29 @@ func render_framed(t: model.Table, st: str) -> str {
         }
         lines = vec.push(lines, line)
     }
-    lines = vec.push(lines, rule_line(g, 0, widths, t.padding))
-    lines = vec.push(lines, data_line(t, t.headers, widths, v, co, shown))
-    if has_body || has_foot {
-        lines = vec.push(lines, rule_line(g, 1, widths, t.padding))
+    if edge == 1 {
+        lines = vec.push(lines, rule_line(g, 0, widths, t.padding, edge))
     }
-    r := 0
-    while r < nr && r < shown {
+    lines = vec.push(lines, header_line(t, widths, v, co, shown))
+    if t.header_line {
+        if has_body || has_foot {
+            lines = vec.push(lines, rule_line(g, 1, widths, t.padding, edge))
+        }
+    }
+    r := win_start(t)
+    end := r + shown
+    while r < nr && r < end {
         lines = vec.push(lines, data_line(t, t.rows[r], widths, v, co, shown))
         if t.row_lines {
-            if r + 1 < shown || has_foot || over > 0 {
-                lines = vec.push(lines, rule_line(g, 1, widths, t.padding))
+            if r + 1 < end || has_foot || over > 0 {
+                lines = vec.push(lines, rule_line(g, 1, widths, t.padding, edge))
             }
         }
         r = r + 1
     }
     if over > 0 {
         if t.row_lines == false && shown > 0 {
-            lines = vec.push(lines, rule_line(g, 1, widths, t.padding))
+            lines = vec.push(lines, rule_line(g, 1, widths, t.padding, edge))
         }
         lines = vec.push(lines, data_line(t, note_row(ncols, over), widths, v, co, shown))
     }
@@ -407,12 +488,29 @@ func render_framed(t: model.Table, st: str) -> str {
             }
         }
         if sep_done == false {
-            lines = vec.push(lines, rule_line(g, 1, widths, t.padding))
+            lines = vec.push(lines, rule_line(g, 1, widths, t.padding, edge))
         }
         lines = vec.push(lines, data_line(t, t.footer, widths, v, co, shown))
     }
-    lines = vec.push(lines, rule_line(g, 2, widths, t.padding))
+    if edge == 1 {
+        lines = vec.push(lines, rule_line(g, 2, widths, t.padding, edge))
+    }
+    cap := caption_line(t)
+    if len(cap) > 0 {
+        lines = vec.push(lines, cap)
+    }
     vec.join(lines, "\n") + "\n"
+}
+
+// One markdown row from pre-padded cells. Outer pipes stay by
+// default; without them the row is still valid markdown.
+
+func md_line(cells: [str], outer: int) -> str {
+    body := vec.join(cells, " | ")
+    if outer == 1 {
+        return "| " + body + " |"
+    }
+    body
 }
 
 func render_markdown(t: model.Table) -> str {
@@ -424,6 +522,10 @@ func render_markdown(t: model.Table) -> str {
     widths := col_widths(t, ncols, co)
     shown := shown_rows(t)
     over := overflow_rows(t)
+    outer := 1
+    if t.outer_border == false {
+        outer = 0
+    }
     // Markdown needs at least 3 dashes per column — widen narrow
     // columns so header, separator, and rows share one width.
     i := 0
@@ -437,13 +539,13 @@ func render_markdown(t: model.Table) -> str {
     if len(t.title) > 0 {
         lines = vec.push(lines, "# " + text.sanitize(t.title))
     }
-    header := "|"
-    sep := "|"
+    hp:[str] = []
+    mp:[str] = []
     i = 0
     while i < ncols {
         raw := cell_at(t, t.headers, i, co)
-        mode := resolve_align(t, i, shown)
-        header = header + " " + pad_cell(raw, widths[i], mode) + " |"
+        mode := resolve_header_align(t, i, shown)
+        hp = vec.push(hp, pad_cell(raw, widths[i], mode))
         dashes := widths[i]
         mark := str.repeat("-", dashes)
         if mode == "right" {
@@ -453,49 +555,54 @@ func render_markdown(t: model.Table) -> str {
                 mark = ":" + str.repeat("-", dashes - 2) + ":"
             }
         }
-        sep = sep + " " + mark + " |"
+        mp = vec.push(mp, mark)
         i = i + 1
     }
-    lines = vec.push(lines, header)
-    lines = vec.push(lines, sep)
+    lines = vec.push(lines, md_line(hp, outer))
+    if t.header_line {
+        lines = vec.push(lines, md_line(mp, outer))
+    }
     nr := len(t.rows)
-    shown := shown_rows(t)
-    over := overflow_rows(t)
-    r := 0
-    while r < nr && r < shown {
-        row := "|"
+    r := win_start(t)
+    end := r + shown
+    while r < nr && r < end {
+        rp:[str] = []
         i = 0
         while i < ncols {
             raw := cell_at(t, t.rows[r], i, co)
             mode := resolve_align(t, i, shown)
-            row = row + " " + pad_cell(raw, widths[i], mode) + " |"
+            rp = vec.push(rp, pad_cell(raw, widths[i], mode))
             i = i + 1
         }
-        lines = vec.push(lines, row)
+        lines = vec.push(lines, md_line(rp, outer))
         r = r + 1
     }
     if over > 0 {
         note := note_row(ncols, over)
-        row := "|"
+        rp:[str] = []
         i = 0
         while i < ncols {
             raw := cell_at(t, note, i, co)
             mode := resolve_align(t, i, shown)
-            row = row + " " + pad_cell(raw, widths[i], mode) + " |"
+            rp = vec.push(rp, pad_cell(raw, widths[i], mode))
             i = i + 1
         }
-        lines = vec.push(lines, row)
+        lines = vec.push(lines, md_line(rp, outer))
     }
     if len(t.footer) > 0 {
-        row := "|"
+        rp:[str] = []
         i = 0
         while i < ncols {
             raw := cell_at(t, t.footer, i, co)
             mode := resolve_align(t, i, shown)
-            row = row + " " + pad_cell(raw, widths[i], mode) + " |"
+            rp = vec.push(rp, pad_cell(raw, widths[i], mode))
             i = i + 1
         }
-        lines = vec.push(lines, row)
+        lines = vec.push(lines, md_line(rp, outer))
+    }
+    cap := caption_line(t)
+    if len(cap) > 0 {
+        lines = vec.push(lines, cap)
     }
     vec.join(lines, "\n") + "\n"
 }
@@ -518,7 +625,7 @@ func render_minimal(t: model.Table) -> str {
     i := 0
     while i < ncols {
         raw := cell_at(t, t.headers, i, co)
-        mode := resolve_align(t, i, shown)
+        mode := resolve_header_align(t, i, shown)
         header = header + pad_cell(raw, widths[i], mode)
         if i + 1 < ncols {
             header = header + gap2
@@ -535,10 +642,13 @@ func render_minimal(t: model.Table) -> str {
         }
         i = i + 1
     }
-    lines = vec.push(lines, rule)
-    r := 0
+    if t.header_line {
+        lines = vec.push(lines, rule)
+    }
+    r := win_start(t)
     nr := len(t.rows)
-    while r < nr && r < shown {
+    end := r + shown
+    while r < nr && r < end {
         row := ""
         i = 0
         while i < ncols {
@@ -582,6 +692,10 @@ func render_minimal(t: model.Table) -> str {
             i = i + 1
         }
         lines = vec.push(lines, row)
+    }
+    cap := caption_line(t)
+    if len(cap) > 0 {
+        lines = vec.push(lines, cap)
     }
     vec.join(lines, "\n") + "\n"
 }

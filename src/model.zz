@@ -15,14 +15,19 @@ pub struct Table {
     rows: [[str]],
     aligns: [str],
     def_align: str,
+    header_align: str,
     col_caps: [int],
     max_width: int,
     max_rows: int,
+    row_offset: int,
     style: str,
     padding: int,
     title: str,
+    caption: str,
     footer: [str],
     row_lines: bool,
+    outer_border: bool,
+    header_line: bool,
 }
 
 /// Create a table with header cells. Style defaults to "rounded".
@@ -37,7 +42,7 @@ pub func new(headers: [str]) -> Table {
         caps = vec.push(caps, 0)
         i = i + 1
     }
-    Table{headers: headers, rows: [], aligns: aligns, def_align: "auto", col_caps: caps, max_width: 0, max_rows: 0, style: "rounded", padding: 1, title: "", footer: [], row_lines: false}
+    Table{headers: headers, rows: [], aligns: aligns, def_align: "auto", header_align: "auto", col_caps: caps, max_width: 0, max_rows: 0, row_offset: 0, style: "rounded", padding: 1, title: "", caption: "", footer: [], row_lines: false, outer_border: true, header_line: true}
 }
 
 /// Create a table from headers plus all rows at once.
@@ -320,6 +325,15 @@ pub func set_align_all(t: Table, mode: str) -> Table {
     t
 }
 
+/// Set header alignment independently from body cells: "left" |
+/// "center" | "right" | "auto" (default: follow each column).
+/// Unknown modes fall back to "left", like `set_align`.
+
+pub func set_header_align(t: Table, mode: str) -> Table {
+    t.header_align = theme.align_name(mode)
+    t
+}
+
 /// Cell padding per side (spaces). Clamped to 0..8.
 
 pub func set_padding(t: Table, n: int) -> Table {
@@ -338,6 +352,15 @@ pub func set_padding(t: Table, n: int) -> Table {
 
 pub func set_title(t: Table, title: str) -> Table {
     t.title = title
+    t
+}
+
+/// Caption line printed below the table (sources, units, footnotes).
+/// Sanitized like cells, so embedded newlines cannot break the grid.
+/// Empty hides it.
+
+pub func set_caption(t: Table, caption: str) -> Table {
+    t.caption = caption
     t
 }
 
@@ -382,6 +405,20 @@ pub func set_max_rows(t: Table, n: int) -> Table {
     t
 }
 
+/// Skip the first `n` body rows (paging partner for `set_max_rows`).
+/// The trailing note counts all hidden rows, above and below.
+/// Negative values are treated as `0`; past-the-end renders headers
+/// (plus note and footer) with an empty body.
+
+pub func set_row_offset(t: Table, n: int) -> Table {
+    m := n
+    if m < 0 {
+        m = 0
+    }
+    t.row_offset = m
+    t
+}
+
 /// Cap one column's visible width (overrides `set_max_width` for that
 /// column). Out-of-range columns are ignored. `0` clears the cap.
 
@@ -405,5 +442,23 @@ pub func set_col_max_width(t: Table, col: int, n: int) -> Table {
 
 pub func set_row_lines(t: Table, on: bool) -> Table {
     t.row_lines = on
+    t
+}
+
+/// Show or hide the outer frame (top/bottom rules and side borders).
+/// Inner column separators stay. Markdown drops its edge pipes
+/// (still valid markdown); minimal has no frame, so this is a no-op
+/// there. Default: shown.
+
+pub func set_outer_border(t: Table, on: bool) -> Table {
+    t.outer_border = on
+    t
+}
+
+/// Show or hide the separator between header and body. Hiding it
+/// merges header and rows into one unruled block. Default: shown.
+
+pub func set_header_line(t: Table, on: bool) -> Table {
+    t.header_line = on
     t
 }
