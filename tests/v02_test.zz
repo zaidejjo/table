@@ -113,3 +113,78 @@ func test_dotted_chaining_style() {
     assert(got.contains("1"))
     assert(got.contains("T"))
 }
+
+@test
+func test_auto_align_numbers_right() {
+    t := table.new(["ITEM", "QTY", "PRICE"])
+    t = table.add_row(t, ["apples", "10", "1.5"])
+    t = table.add_row(t, ["oranges", "4", "12.25"])
+    got := table.render(t)
+    assert(got.contains("│  10 │"))
+    assert(got.contains("│   1.5 │"))
+    assert(got.contains("│ apples  │"))
+}
+
+@test
+func test_auto_align_explicit_wins() {
+    t := table.new(["N"])
+    t = table.add_row(t, ["7"])
+    t = table.set_align(t, 0, "left")
+    assert(table.render(t).contains("│ 7 │"))
+    t = table.set_align(t, 0, "auto")
+    assert(table.render(t).contains("│ 7 │"))
+}
+
+@test
+func test_auto_align_text_stays_left() {
+    t := table.new(["A", "B"])
+    t = table.add_row(t, ["x", "1"])
+    t = table.add_row(t, ["yz", "nope"])
+    got := table.render(t)
+    assert(got.contains("│ yz │ nope │"))
+}
+
+@test
+func test_from_dicts() {
+    rows := [{"id": 1, "name": "a"}, {"id": 22, "name": "bb"}]
+    t := table.from_dicts(["id", "name"], rows)
+    got := table.render(t)
+    assert(got.contains("22"))
+    assert(got.contains("bb"))
+    assert(got.contains("id"))
+}
+
+@test
+func test_max_rows_note() {
+    t := table.new(["A"])
+    t = table.add_row(t, ["1"])
+    t = table.add_row(t, ["2"])
+    t = table.add_row(t, ["3"])
+    t = table.set_max_rows(t, 2)
+    got := table.render(t)
+    // Single "A"/"1"/"2" column is numeric → auto right-aligned.
+    want := "╭───────────╮\n│         A │\n├───────────┤\n│         1 │\n│         2 │\n├───────────┤\n│ … +1 more │\n╰───────────╯\n"
+    assert_eq(got, want)
+}
+
+@test
+func test_max_rows_off_and_fit() {
+    t := table.new(["A"])
+    t = table.add_row(t, ["1"])
+    t = table.set_max_rows(t, 5)
+    assert(table.render(t).contains("1"))
+    t = table.set_max_rows(t, 0 - 3)
+    assert(table.render(t).contains("1"))
+}
+
+@test
+func test_max_rows_minimal_markdown() {
+    t := table.new(["A"])
+    t = table.add_row(t, ["1"])
+    t = table.add_row(t, ["2"])
+    t = table.set_max_rows(t, 1)
+    mn := table.render(table.set_style(t, "minimal"))
+    assert(mn.contains("+1 more"))
+    md := table.render(table.set_style(t, "markdown"))
+    assert(md.contains("+1 more"))
+}

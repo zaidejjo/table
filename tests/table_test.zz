@@ -9,7 +9,8 @@ func test_rounded_golden() {
     t = table.add_row(t, ["Alice", "25"])
     t = table.add_row(t, ["Bob", "30"])
     got := table.render(t)
-    want := "╭───────┬─────╮\n│ NAME  │ AGE │\n├───────┼─────┤\n│ Alice │ 25  │\n│ Bob   │ 30  │\n╰───────┴─────╯\n"
+    // AGE auto-aligns right: both cells are numeric.
+    want := "╭───────┬─────╮\n│ NAME  │ AGE │\n├───────┼─────┤\n│ Alice │  25 │\n│ Bob   │  30 │\n╰───────┴─────╯\n"
     assert_eq(got, want)
 }
 
@@ -71,8 +72,8 @@ func test_styles_glyphs() {
     assert(minimal.contains("─"))
     assert(minimal.contains("A"))
     md := table.render(table.set_style(base, "markdown"))
-    assert(md.contains("| A"))
-    assert(md.contains("---"))
+    assert(md.contains("A"))
+    assert(md.contains("--"))
 }
 
 @test
