@@ -1,0 +1,117 @@
+// v04_test.zz — accessors, index column, transpose, hide_col.
+import table
+
+@test
+func test_accessors() {
+    t := table.new(["A", "B"])
+    t = table.add_row(t, ["1", "2", "x"])
+    t = table.add_row(t, ["y"])
+    t = table.set_footer(t, ["f", "g", "h", "i"])
+    assert_eq(table.row_count(t), 2)
+    assert_eq(table.col_count(t), 4)
+    assert_eq(table.headers(t), ["A", "B"])
+    assert_eq(table.row(t, 0), ["1", "2", "x"])
+    assert_eq(table.row(t, 1), ["y"])
+    assert_eq(table.row(t, 5), [])
+    assert_eq(table.row(t, 0 - 1), [])
+}
+
+@test
+func test_headers_returns_copy() {
+    t := table.new(["A"])
+    h := table.headers(t)
+    h[0] = "Z"
+    assert_eq(table.headers(t), ["A"])
+}
+
+@test
+func test_row_numbers_golden() {
+    t := table.new(["v"])
+    t = table.add_row(t, ["a"])
+    t = table.add_row(t, ["bb"])
+    t = table.with_row_numbers(t, "#")
+    got := table.render(t)
+    want := "╭───┬────╮\n│ # │ v  │\n├───┼────┤\n│ 1 │ a  │\n│ 2 │ bb │\n╰───┴────╯\n"
+    assert_eq(got, want)
+}
+
+@test
+func test_row_numbers_stable_under_offset() {
+    t := table.new(["v"])
+    t = table.add_row(t, ["a"])
+    t = table.add_row(t, ["b"])
+    t = table.add_row(t, ["c"])
+    t = table.with_row_numbers(t, "#")
+    t = table.set_row_offset(t, 1)
+    t = table.set_max_rows(t, 1)
+    got := table.render(t)
+    assert(got.contains("2"))
+    assert(got.contains("b"))
+    assert(got.contains("+2 more"))
+    assert_eq(got.contains("a"), false)
+}
+
+@test
+func test_transpose_golden() {
+    t := table.new(["A", "B"])
+    t = table.add_row(t, ["1", "2"])
+    t = table.add_row(t, ["3", "4"])
+    got := table.render(table.transpose(t))
+    want := "╭───┬───┬───╮\n│ A │ 1 │ 3 │\n├───┼───┼───┤\n│ B │ 2 │ 4 │\n╰───┴───┴───╯\n"
+    assert_eq(got, want)
+}
+
+@test
+func test_transpose_ragged() {
+    t := table.new(["A"])
+    t = table.add_row(t, ["1", "2"])
+    got := table.render(table.transpose(t))
+    assert(got.contains("A"))
+    assert(got.contains("2"))
+}
+
+@test
+func test_hide_col_golden() {
+    t := table.new(["A", "B", "C"])
+    t = table.add_row(t, ["1", "2", "3"])
+    t = table.hide_col(t, 1)
+    got := table.render(t)
+    want := "╭───┬───╮\n│ A │ C │\n├───┼───┤\n│ 1 │ 3 │\n╰───┴───╯\n"
+    assert_eq(got, want)
+}
+
+@test
+func test_hide_col_double_and_bad() {
+    t := table.new(["A", "B", "C"])
+    t = table.add_row(t, ["1", "2", "3"])
+    t = table.hide_col(t, 0)
+    t = table.hide_col(t, 0)
+    assert(table.render(t).contains("│ C │"))
+    t2 := table.new(["A"])
+    t2 = table.hide_col(t2, 9)
+    t2 = table.hide_col(t2, 0 - 1)
+    assert(table.render(t2).contains("A"))
+}
+
+@test
+func test_hide_col_shifts_footer() {
+    t := table.new(["A", "B"])
+    t = table.add_row(t, ["1", "2"])
+    t = table.set_footer(t, ["f1", "f2"])
+    t = table.hide_col(t, 0)
+    got := table.render(t)
+    assert(got.contains("f2"))
+    assert_eq(got.contains("f1"), false)
+}
+
+@test
+func test_shape_pack_pipeline() {
+    got := table.new(["A", "B"])
+        |> table.add_row(["1", "2"])
+        |> table.with_row_numbers("#")
+        |> table.hide_col(2)
+        |> table.transpose()
+        |> table.render()
+    assert(got.contains("#"))
+    assert(got.contains("A"))
+}

@@ -109,6 +109,24 @@ counts every hidden row, above and below the window. Widths and
 auto-alignment only see the shown window, so hidden rows never stretch
 columns.
 
+## Shape
+
+```zz
+table.row_count(t)   // body rows — total pages for your pager
+table.col_count(t)   // rendered columns (headers/rows/footer max)
+table.headers(t)     // header cells (a copy)
+table.row(t, 0)      // one body row (a copy, [] when out of range)
+
+t = table.with_row_numbers(t, "#") // 1-based index column at the left
+t = table.transpose(t)             // swap rows and columns
+t = table.hide_col(t, 2)           // drop a column (indices are current)
+```
+
+Index numbers are global, so pages keep stable numbering. Transpose
+keeps display settings but resets per-column alignment to auto and
+drops the footer. Hides compose: each index refers to the current
+table.
+
 ## Colors
 
 Pass `std.colors` output straight in. Widths are measured on the
@@ -134,6 +152,9 @@ table.print(t) // render + println in one call
   closure; the `std.sqlz` bridge, pipeline-first argument order.
 - `column(rows, f)` / `from_cols(headers, cols)` — build column by
   column, then transpose (short columns pad with `""`).
+- `row_count` / `col_count` / `headers` / `row` — read shape (copies,
+  total accessors).
+- `with_row_numbers(header)` / `transpose` / `hide_col(col)` — reshape.
 - `set_style` / `set_align` / `set_align_all` / `set_header_align` /
   `set_padding` / `set_title` / `set_caption` / `set_footer` /
   `set_row_lines` / `set_outer_border` / `set_header_line` — builders above.
@@ -207,9 +228,10 @@ invalid JSON yields a headers-only table, never an error.
 
 ## Tests
 
-`zz test` runs 58 checks: golden rounded output, per-column
+`zz test` runs 68 checks: golden rounded output, per-column
 alignment (incl. sticky `set_align_all`), header alignment, border
-toggles across styles, row-offset paging, captions, footer separator,
+toggles across styles, row-offset paging, captions, shape accessors,
+index columns, transpose and hide goldens, footer separator,
 title, all seven glyph sets, fallback paths, uneven rows, empty
 tables, newline folding, ANSI-safe widths, bulk APIs, row lines,
 padding clamps, five `std.sqlz` bridge checks (struct rows, `|>`
@@ -218,4 +240,7 @@ eleven v0.2.0 checks (truncation goldens, per-column caps, colored
 truncation without bleed, markdown/minimal truncation, JSON shapes,
 derived headers, invalid-JSON empties, pipeline fluency), plus
 eighteen v0.3.0 checks (header goldens, frameless/borderless outputs,
-offset windows and page counts, width isolation, caption goldens).
+offset windows and page counts, width isolation, caption goldens),
+plus ten v0.4.0 checks (accessors incl. copy isolation, index goldens
+and page stability, transpose goldens incl. ragged input, hide goldens
+incl. footer shift, shape pipeline).

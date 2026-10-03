@@ -154,24 +154,6 @@ func resolve_header_align(t: model.Table, i: int, shown: int) -> str {
     resolve_align(t, i, shown)
 }
 
-func col_count(t: model.Table) -> int {
-    n := len(t.headers)
-    i := 0
-    m := len(t.rows)
-    while i < m {
-        w := len(t.rows[i])
-        if w > n {
-            n = w
-        }
-        i = i + 1
-    }
-    f := len(t.footer)
-    if f > n {
-        n = f
-    }
-    n
-}
-
 // First visible body row under `row_offset`, clamped into range.
 // Past-the-end yields `len(rows)`: an empty window, never a panic.
 
@@ -414,7 +396,7 @@ func inner_width(widths: [int], pad: int) -> int {
 }
 
 func render_framed(t: model.Table, st: str) -> str {
-    ncols := col_count(t)
+    ncols := model.col_count(t)
     if ncols == 0 {
         return ""
     }
@@ -514,7 +496,7 @@ func md_line(cells: [str], outer: int) -> str {
 }
 
 func render_markdown(t: model.Table) -> str {
-    ncols := col_count(t)
+    ncols := model.col_count(t)
     if ncols == 0 {
         return ""
     }
@@ -608,7 +590,7 @@ func render_markdown(t: model.Table) -> str {
 }
 
 func render_minimal(t: model.Table) -> str {
-    ncols := col_count(t)
+    ncols := model.col_count(t)
     if ncols == 0 {
         return ""
     }
