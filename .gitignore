@@ -3,3 +3,6 @@
 vendor/
 build/
 src/bin/
+**/bin/
+*.tar.gz
+.zz_test_cache
