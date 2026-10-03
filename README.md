@@ -3,9 +3,7 @@
 Beautiful rounded CLI tables for ZZ. Pure ZZ, zero dependencies.
 
 ```toml
-[dependencies.table]
-path = "…"
-# or: zz add table
+zz add table
 ```
 
 ```zz
@@ -94,6 +92,10 @@ table.print(t) // render + println in one call
 - `simple(headers, rows)` — build and render immediately.
 - `add_row(t, row)` / `add_rows(t, rows)` — append (short rows pad
   with `""`, long rows render whole, never panics).
+- `from(rows, headers, f)` — build from any row type via a mapper
+  closure; the `std.sqlz` bridge, pipeline-first argument order.
+- `column(rows, f)` / `from_cols(headers, cols)` — build column by
+  column, then transpose (short columns pad with `""`).
 - `set_style` / `set_align` / `set_align_all` / `set_padding` /
   `set_title` / `set_footer` / `set_row_lines` — builders above.
 - `render(t)` — string (trailing newline included).
@@ -105,9 +107,43 @@ table.print(t) // render + println in one call
 Cells are single-line by design: embedded `\n`/`\t` fold to spaces so
 one bad cell can never break the grid.
 
+## `std.sqlz` support
+
+Query rows flow into tables through one mapper closure. `from` takes
+rows first, so `|>` pipelines read top to bottom:
+
+```zz
+import std.sqlz
+import table
+
+struct User { id: int, name: str }
+
+mydb := sqlz.open(":memory:")
+users: [User] = mydb.query("""SELECT id, name FROM users""")
+
+users
+    |> table.from(["ID", "NAME"], |u: User| [str(u.id), u.name])
+    |> table.render()
+    |> println()
+```
+
+Unannotated queries (`row{c0, c1, …}` dicts) work the same way with an
+untyped mapper: `|r| [str(r.c0), str(r.c1)]`. Two smaller builders
+compose column by column:
+
+```zz
+ids := table.column(users, |u: User| str(u.id))
+t := table.from_cols(["ID", "NAME"], [ids, names])
+```
+
+See `examples/sqlz_demo.zz` (`cd examples && zz install && zz run
+sqlz_demo.zz`) for filter-then-display pipelines.
+
 ## Tests
 
-`zz test` runs 16 checks: golden rounded output, per-column
-alignment (incl. sticky `set_align_all`), footer separator, title, all seven glyph sets, fallback
-paths, uneven rows, empty tables, newline folding, ANSI-safe widths,
-bulk APIs, row lines, and padding clamps.
+`zz test` runs 21 checks: golden rounded output, per-column
+alignment (incl. sticky `set_align_all`), footer separator, title,
+all seven glyph sets, fallback paths, uneven rows, empty tables,
+newline folding, ANSI-safe widths, bulk APIs, row lines, padding
+clamps, plus five `std.sqlz` bridge checks (struct rows, `|>`
+pipelines, unannotated rows, `column`/`from_cols`, empty results).

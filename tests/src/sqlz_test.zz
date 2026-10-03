@@ -1,0 +1,73 @@
+// sqlz_test.zz — table <-> std.sqlz bridge: from/column/from_cols + pipelines.
+import std.sqlz
+
+import table
+
+struct User {
+    id: int,
+    name: str,
+}
+
+func seed_db() -> db {
+    mydb := sqlz.open(":memory:")
+    mydb.exec("""CREATE TABLE users (id INTEGER, name TEXT)""")
+    mydb.exec("""INSERT INTO users VALUES (1, 'alice')""")
+    mydb.exec("""INSERT INTO users VALUES (2, 'bob')""")
+    mydb
+}
+
+@test
+func test_from_structs() {
+    mydb := seed_db()
+    users:[User] = mydb.query("""SELECT id, name FROM users""")
+    t := table.from(users, ["ID", "NAME"], |u: User| [str(u.id), u.name])
+    got := table.render(t)
+    want := "╭────┬───────╮\n│ ID │ NAME  │\n├────┼───────┤\n│ 1  │ alice │\n│ 2  │ bob   │\n╰────┴───────╯\n"
+    assert_eq(got, want)
+}
+
+@test
+func test_from_pipeline() {
+    mydb := seed_db()
+    users:[User] = mydb.query("""SELECT id, name FROM users""")
+    got := users
+        |> table.from(["ID", "NAME"], |u: User| [str(u.id), u.name])
+        |> table.render()
+    assert(got.contains("alice"))
+    assert(got.contains("╭"))
+}
+
+@test
+func test_from_unannotated_rows() {
+    // NOTE: unannotated `row{c0}` field reads are VM-only for now
+    // (native returns unit — compiler bug 7, reported upstream).
+    mydb := seed_db()
+    rows := mydb.query("""SELECT id, name FROM users""")
+    t := table.from(rows, ["ID", "NAME"], |r| [str(r.c0), str(r.c1)])
+    got := table.render(t)
+    assert(got.contains("bob"))
+}
+
+@test
+func test_column_and_from_cols() {
+    mydb := seed_db()
+    users:[User] = mydb.query("""SELECT id, name FROM users""")
+    ids := table.column(users, |u: User| str(u.id))
+    assert_eq(ids, ["1", "2"])
+    names := users |> table.column(|u: User| u.name)
+    assert_eq(names, ["alice", "bob"])
+    t := table.from_cols(["ID", "NAME"], [ids, names])
+    got := table.render(t)
+    assert(got.contains("alice"))
+    short := table.from_cols(["A", "B"], [["x"], ["1", "2"]])
+    assert(table.render(short).contains("2"))
+}
+
+@test
+func test_from_empty() {
+    mydb := seed_db()
+    users:[User] = mydb.query("""SELECT id, name FROM users WHERE id > 99""")
+    t := table.from(users, ["ID", "NAME"], |u: User| [str(u.id), u.name])
+    got := table.render(t)
+    assert(got.contains("ID"))
+}

@@ -1,0 +1,36 @@
+// sqlz demo: query -> table through |> pipelines. Run from examples/:
+//   zz install && zz run sqlz_demo.zz
+import std.sqlz
+
+import table
+
+struct User {
+    id: int,
+    name: str,
+    score: float,
+}
+
+func main() {
+    mydb := sqlz.open(":memory:")
+    mydb.exec("""CREATE TABLE users (id INTEGER, name TEXT, score REAL)""")
+    mydb.exec("""INSERT INTO users VALUES (1, 'alice', 9.5)""")
+    mydb.exec("""INSERT INTO users VALUES (2, 'bob', 7.25)""")
+    mydb.exec("""INSERT INTO users VALUES (3, 'cara', 8.0)""")
+    // Struct-mapped rows + pipeline straight into render.
+    users:[User] = mydb.query("""SELECT id, name, score FROM users""")
+    users
+        |> table.from(
+            ["ID", "NAME", "SCORE"],
+            |u: User| [str(u.id), u.name, str(u.score)]
+        )
+        |> table.render()
+        |> println()
+    // Filter first, then display: pipelines compose with std builtins.
+    users
+        |> filter(|u: User| u.score > 8.0)
+        |> table.from(["ID", "NAME"], |u: User| [str(u.id), u.name])
+        |> table.set_title("Top scorers")
+        |> table.render()
+        |> println()
+    println("sqlz_demo_ok")
+}
