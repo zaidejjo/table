@@ -1,5 +1,5 @@
 // engine.zz — widths, lines, borders, and the three renderers.
-// Reads model.Table fields; never constructs tables.
+// Reads model.Table fields; only fit_width writes back (via setters).
 import std.str
 import std.vec
 
@@ -11,6 +11,45 @@ import theme
 
 pub func simple(headers: [str], rows: [[str]]) -> str {
     render(model.from_rows(headers, rows))
+}
+
+/// Shrink column caps until the framed table fits `total` terminal
+/// columns (sides included). Only caps move, one column at a time,
+/// widest first; columns at width 3 or below are never touched, and
+/// existing caps are only ever lowered. Non-positive totals are
+/// ignored. Best effort: when even the floor doesn't fit, the table
+/// comes back as small as caps allow. Reduce padding for more room.
+
+pub func fit_width(t: model.Table, total: int) -> model.Table {
+    if total <= 0 {
+        return t
+    }
+    ncols := model.col_count(t)
+    if ncols == 0 {
+        return t
+    }
+    widths := col_widths(t, ncols, caps_on(t))
+    over := inner_width(widths, t.padding) + 2 - total
+    while over > 0 {
+        best := 0 - 1
+        bw := 3
+        i := 0
+        while i < ncols {
+            if widths[i] > bw {
+                bw = widths[i]
+                best = i
+            }
+            i = i + 1
+        }
+        if best < 0 {
+            over = 0
+        } else {
+            t = model.set_col_max_width(t, best, bw - 1)
+            widths = col_widths(t, ncols, caps_on(t))
+            over = inner_width(widths, t.padding) + 2 - total
+        }
+    }
+    t
 }
 
 /// Render to a string (trailing newline included, no printing).

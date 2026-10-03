@@ -1,0 +1,129 @@
+// v05_test.zz — aggregates, exporters, fit_width.
+import table
+
+@test
+func test_col_sum_ints() {
+    t := table.new(["N"])
+    t = table.add_row(t, ["1"])
+    t = table.add_row(t, ["2"])
+    t = table.add_row(t, ["3"])
+    assert_eq(table.col_sum(t, 0), 6.0)
+    assert_eq(table.col_num_count(t, 0), 3)
+}
+
+@test
+func test_col_sum_skips_junk() {
+    t := table.new(["N"])
+    t = table.add_row(t, ["1.5"])
+    t = table.add_row(t, ["2"])
+    t = table.add_row(t, ["x"])
+    t = table.add_row(t, [""])
+    assert_eq(table.col_sum(t, 0), 3.5)
+    assert_eq(table.col_num_count(t, 0), 2)
+}
+
+@test
+func test_col_avg() {
+    t := table.new(["N"])
+    t = table.add_row(t, ["1"])
+    t = table.add_row(t, ["2"])
+    t = table.add_row(t, ["3"])
+    assert_eq(table.col_avg(t, 0), 2.0)
+}
+
+@test
+func test_aggregates_empty_and_bad() {
+    t := table.new(["A"])
+    t = table.add_row(t, ["x"])
+    assert_eq(table.col_sum(t, 0), 0.0)
+    assert_eq(table.col_avg(t, 0), 0.0)
+    assert_eq(table.col_num_count(t, 0), 0)
+    assert_eq(table.col_sum(t, 9), 0.0)
+    assert_eq(table.col_avg(t, 0 - 1), 0.0)
+    assert_eq(table.col_num_count(t, 9), 0)
+}
+
+@test
+func test_to_csv_golden() {
+    t := table.new(["A", "B"])
+    t = table.add_row(t, ["x, y", "say \"hi\""])
+    t = table.add_row(t, ["plain", "z"])
+    t = table.set_footer(t, ["f", "g"])
+    got := table.to_csv(t)
+    want := "A,B\n\"x, y\",\"say \"\"hi\"\"\"\nplain,z\nf,g\n"
+    assert_eq(got, want)
+}
+
+@test
+func test_to_csv_ignores_window() {
+    t := table.new(["A"])
+    t = table.add_row(t, ["1"])
+    t = table.add_row(t, ["2"])
+    t = table.set_max_rows(t, 1)
+    got := table.to_csv(t)
+    assert(got.contains("1"))
+    assert(got.contains("2"))
+    assert_eq(got.contains("more"), false)
+}
+
+@test
+func test_to_json_golden() {
+    t := table.new(["id", "name"])
+    t = table.add_row(t, ["1", "a"])
+    t = table.add_row(t, ["2", "b"])
+    assert_eq(table.to_json(t), "[{\"id\": \"1\", \"name\": \"a\"}, {\"id\": \"2\", \"name\": \"b\"}]")
+}
+
+@test
+func test_to_json_escapes() {
+    t := table.new(["A"])
+    t = table.add_row(t, ["a\"b\\c"])
+    got := table.to_json(t)
+    assert(got.contains("a\\\"b\\\\c"))
+}
+
+@test
+func test_to_rows_round_trip() {
+    t := table.new(["A", "B"])
+    t = table.add_row(t, ["1", "2"])
+    assert_eq(table.to_rows(t), [["A", "B"], ["1", "2"]])
+    back := table.from_rows(table.to_rows(t)[0], [table.to_rows(t)[1]])
+    assert_eq(table.render(back), table.render(t))
+}
+
+@test
+func test_fit_width_shrinks() {
+    t := table.new(["NAME", "ABOUT"])
+    t = table.add_row(t, ["Alice", "loves very long sentences here"])
+    t = table.fit_width(t, 30)
+    got := table.render(t)
+    assert(table.visible_len(got.split("\n")[0]) <= 30)
+    assert(got.contains("…"))
+}
+
+@test
+func test_fit_width_untouched_when_fitting() {
+    t := table.new(["A"])
+    t = table.add_row(t, ["1"])
+    plain := table.render(t)
+    assert_eq(table.render(table.fit_width(t, 80)), plain)
+}
+
+@test
+func test_fit_width_bad_total_ignored() {
+    t := table.new(["A"])
+    t = table.add_row(t, ["1"])
+    plain := table.render(t)
+    assert_eq(table.render(table.fit_width(t, 0)), plain)
+    assert_eq(table.render(table.fit_width(t, 0 - 5)), plain)
+}
+
+@test
+func test_fit_width_floor() {
+    t := table.new(["A"])
+    t = table.add_row(t, ["abcdefghij"])
+    t = table.fit_width(t, 8)
+    got := table.render(t)
+    assert(table.visible_len(got.split("\n")[0]) <= 8)
+    assert(got.contains("…"))
+}
