@@ -79,6 +79,30 @@ pub func add_rows(t: model.Table, rows: [[str]]) -> model.Table {
     model.add_rows(t, rows)
 }
 
+/// Body row count. Handy for paging UIs (`set_max_rows`/`set_row_offset`).
+
+pub func row_count(t: model.Table) -> int {
+    model.row_count(t)
+}
+
+/// Rendered column count: widest of headers, rows, and footer.
+
+pub func col_count(t: model.Table) -> int {
+    model.col_count(t)
+}
+
+/// Header cells (a copy — mutating it never touches the table).
+
+pub func headers(t: model.Table) -> [str] {
+    model.headers(t)
+}
+
+/// One body row (a copy). Out-of-range indices yield `[]`, never a panic.
+
+pub func row(t: model.Table, i: int) -> [str] {
+    model.row(t, i)
+}
+
 /// Build from any row type via a mapper closure. This is the sqlz
 /// bridge: query structs (or unannoted `row{c0, …}` dicts) become
 /// string cells through your mapper. Rows-first so `|>` pipelines
@@ -108,6 +132,31 @@ pub func column<T>(rows: [T], f: func(T) -> str) -> [str] {
 
 pub func from_cols(headers: [str], cols: [[str]]) -> model.Table {
     model.from_cols(headers, cols)
+}
+
+/// Insert a 1-based index column at the left. Numbers are global, so
+/// pages (`set_row_offset`) stay stable. The index column is numeric
+/// (auto right-aligned); pass `""` for a blank header. The footer
+/// gains a blank cell to stay aligned.
+
+pub func with_row_numbers(t: model.Table, header: str) -> model.Table {
+    model.with_row_numbers(t, header)
+}
+
+/// Transpose rows and columns: headers become the first row, the old
+/// first column becomes the new headers. Display settings carry over;
+/// per-column alignment resets to auto and the footer is dropped.
+
+pub func transpose(t: model.Table) -> model.Table {
+    model.transpose(t)
+}
+
+/// Drop one column from headers, every row, footer, and spans.
+/// Out-of-range indices are ignored. Repeated hides compose: indices
+/// always refer to the current table.
+
+pub func hide_col(t: model.Table, col: int) -> model.Table {
+    model.hide_col(t, col)
 }
 
 /// Build from a JSON document: array-of-arrays (cells in order) or

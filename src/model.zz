@@ -45,6 +45,64 @@ pub func new(headers: [str]) -> Table {
     Table{headers: headers, rows: [], aligns: aligns, def_align: "auto", header_align: "auto", col_caps: caps, max_width: 0, max_rows: 0, row_offset: 0, style: "rounded", padding: 1, title: "", caption: "", footer: [], row_lines: false, outer_border: true, header_line: true}
 }
 
+/// Body row count. Handy for paging UIs (`set_max_rows`/`set_row_offset`).
+
+pub func row_count(t: Table) -> int {
+    len(t.rows)
+}
+
+/// Rendered column count: widest of headers, rows, and footer.
+
+pub func col_count(t: Table) -> int {
+    n := len(t.headers)
+    i := 0
+    m := len(t.rows)
+    while i < m {
+        w := len(t.rows[i])
+        if w > n {
+            n = w
+        }
+        i = i + 1
+    }
+    f := len(t.footer)
+    if f > n {
+        n = f
+    }
+    n
+}
+
+/// Header cells (a copy — mutating it never touches the table).
+
+pub func headers(t: Table) -> [str] {
+    out:[str] = []
+    i := 0
+    n := len(t.headers)
+    while i < n {
+        out = vec.push(out, t.headers[i])
+        i = i + 1
+    }
+    out
+}
+
+/// One body row (a copy). Out-of-range indices yield `[]`, never a panic.
+
+pub func row(t: Table, i: int) -> [str] {
+    out:[str] = []
+    if i < 0 {
+        return out
+    }
+    if i >= len(t.rows) {
+        return out
+    }
+    src := t.rows[i]
+    j := 0
+    while j < len(src) {
+        out = vec.push(out, src[j])
+        j = j + 1
+    }
+    out
+}
+
 /// Create a table from headers plus all rows at once.
 
 pub func from_rows(headers: [str], rows: [[str]]) -> Table {
@@ -282,6 +340,169 @@ pub func from_cols(headers: [str], cols: [[str]]) -> Table {
             c = c + 1
         }
         t = add_row(t, buf)
+        r = r + 1
+    }
+    t
+}
+
+/// Insert a 1-based index column at the left. Numbers are global, so
+/// pages (`set_row_offset`) stay stable. The index column is numeric
+/// (auto right-aligned); pass `""` for a blank header. The footer
+/// gains a blank cell to stay aligned.
+
+pub func with_row_numbers(t: Table, header: str) -> Table {
+    nh:[str] = []
+    nh = vec.push(nh, header)
+    i := 0
+    while i < len(t.headers) {
+        nh = vec.push(nh, t.headers[i])
+        i = i + 1
+    }
+    t.headers = nh
+    na:[str] = []
+    na = vec.push(na, "auto")
+    i = 0
+    while i < len(t.aligns) {
+        na = vec.push(na, t.aligns[i])
+        i = i + 1
+    }
+    t.aligns = na
+    nc:[int] = []
+    nc = vec.push(nc, 0)
+    i = 0
+    while i < len(t.col_caps) {
+        nc = vec.push(nc, t.col_caps[i])
+        i = i + 1
+    }
+    t.col_caps = nc
+    r := 0
+    while r < len(t.rows) {
+        buf:[str] = []
+        buf = vec.push(buf, str(r + 1))
+        c := 0
+        old := t.rows[r]
+        while c < len(old) {
+            buf = vec.push(buf, old[c])
+            c = c + 1
+        }
+        t.rows[r] = buf
+        r = r + 1
+    }
+    if len(t.footer) > 0 {
+        fb:[str] = []
+        fb = vec.push(fb, "")
+        f := 0
+        while f < len(t.footer) {
+            fb = vec.push(fb, t.footer[f])
+            f = f + 1
+        }
+        t.footer = fb
+    }
+    t
+}
+
+// One grid cell with headers as row -1. Short rows and missing cells
+// read as "" so ragged tables transpose cleanly.
+
+func grid_at(t: Table, r: int, c: int) -> str {
+    if r < 0 {
+        if c >= 0 && c < len(t.headers) {
+            return t.headers[c]
+        }
+        return ""
+    }
+    if r < len(t.rows) && c >= 0 && c < len(t.rows[r]) {
+        return t.rows[r][c]
+    }
+    ""
+}
+
+/// Transpose rows and columns: headers become the first row, the old
+/// first column becomes the new headers. Display settings (style,
+/// padding, title, caption, borders, caps, paging) carry over;
+/// per-column alignment resets to auto and the footer is dropped
+/// (it has no meaningful transposed position).
+
+pub func transpose(t: Table) -> Table {
+    ncols := col_count(t)
+    if ncols == 0 {
+        hd:[str] = []
+        return new(hd)
+    }
+    nh:[str] = []
+    r := 0 - 1
+    nr := len(t.rows)
+    while r < nr {
+        nh = vec.push(nh, grid_at(t, r, 0))
+        r = r + 1
+    }
+    out := new(nh)
+    c := 1
+    while c < ncols {
+        buf:[str] = []
+        r = 0 - 1
+        while r < nr {
+            buf = vec.push(buf, grid_at(t, r, c))
+            r = r + 1
+        }
+        out = add_row(out, buf)
+        c = c + 1
+    }
+    out.style = t.style
+    out.padding = t.padding
+    out.title = t.title
+    out.caption = t.caption
+    out.header_align = t.header_align
+    out.row_lines = t.row_lines
+    out.outer_border = t.outer_border
+    out.header_line = t.header_line
+    out.max_width = t.max_width
+    out.max_rows = t.max_rows
+    out
+}
+
+func drop_str(xs: [str], at: int) -> [str] {
+    out:[str] = []
+    i := 0
+    while i < len(xs) {
+        if i != at {
+            out = vec.push(out, xs[i])
+        }
+        i = i + 1
+    }
+    out
+}
+
+func drop_int(xs: [int], at: int) -> [int] {
+    out:[int] = []
+    i := 0
+    while i < len(xs) {
+        if i != at {
+            out = vec.push(out, xs[i])
+        }
+        i = i + 1
+    }
+    out
+}
+
+/// Drop one column from headers, every row, footer, and spans.
+/// Out-of-range indices are ignored. Repeated hides compose: indices
+/// always refer to the current table.
+
+pub func hide_col(t: Table, col: int) -> Table {
+    if col < 0 {
+        return t
+    }
+    if col >= col_count(t) {
+        return t
+    }
+    t.headers = drop_str(t.headers, col)
+    t.aligns = drop_str(t.aligns, col)
+    t.col_caps = drop_int(t.col_caps, col)
+    t.footer = drop_str(t.footer, col)
+    r := 0
+    while r < len(t.rows) {
+        t.rows[r] = drop_str(t.rows[r], col)
         r = r + 1
     }
     t
