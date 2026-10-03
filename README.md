@@ -127,6 +127,27 @@ keeps display settings but resets per-column alignment to auto and
 drops the footer. Hides compose: each index refers to the current
 table.
 
+## Data
+
+```zz
+table.col_sum(t, 0)   // 6.0 — numeric cells only, junk skipped
+table.col_avg(t, 0)   // 2.0 — 0.0 when nothing numeric (never NaN)
+table.col_num_count(t, 0) // how many cells voted
+
+table.to_csv(t)   // headers + rows + footer, RFC quoting
+table.to_json(t)  // [{"id": "1", …}, …], body rows keyed by headers
+table.to_rows(t)  // headers + rows, round-trips with from_rows
+
+t = table.fit_width(t, 80) // shrink caps until the frame fits 80 cols
+```
+
+Aggregates see the full column (paging never applies) and follow the
+same numeric rule as auto-alignment. Exporters dump complete data:
+truncation and paging never apply, the `… +N more` note is excluded,
+and the footer joins CSV (as the last row) but not JSON (a display
+total). `fit_width` only lowers caps, widest column first, floor 3 —
+reduce padding first for more room.
+
 ## Colors
 
 Pass `std.colors` output straight in. Widths are measured on the
@@ -155,6 +176,9 @@ table.print(t) // render + println in one call
 - `row_count` / `col_count` / `headers` / `row` — read shape (copies,
   total accessors).
 - `with_row_numbers(header)` / `transpose` / `hide_col(col)` — reshape.
+- `col_sum` / `col_avg` / `col_num_count` — column aggregates.
+- `to_csv` / `to_json` / `to_rows` — full-data exporters.
+- `fit_width(total)` — shrink caps to fit a terminal width.
 - `set_style` / `set_align` / `set_align_all` / `set_header_align` /
   `set_padding` / `set_title` / `set_caption` / `set_footer` /
   `set_row_lines` / `set_outer_border` / `set_header_line` — builders above.
@@ -228,7 +252,7 @@ invalid JSON yields a headers-only table, never an error.
 
 ## Tests
 
-`zz test` runs 68 checks: golden rounded output, per-column
+`zz test` runs 81 checks: golden rounded output, per-column
 alignment (incl. sticky `set_align_all`), header alignment, border
 toggles across styles, row-offset paging, captions, shape accessors,
 index columns, transpose and hide goldens, footer separator,
@@ -243,4 +267,7 @@ eighteen v0.3.0 checks (header goldens, frameless/borderless outputs,
 offset windows and page counts, width isolation, caption goldens),
 plus ten v0.4.0 checks (accessors incl. copy isolation, index goldens
 and page stability, transpose goldens incl. ragged input, hide goldens
-incl. footer shift, shape pipeline).
+incl. footer shift, shape pipeline), plus thirteen v0.5.0 checks
+(aggregates incl. junk-skipping and divide-by-zero, CSV goldens and
+window independence, JSON goldens and escaping, rows round-trip, fit
+shrink/floor/untouched paths).

@@ -159,6 +159,58 @@ pub func hide_col(t: model.Table, col: int) -> model.Table {
     model.hide_col(t, col)
 }
 
+/// Sum of numeric-looking body cells in one column. Non-numeric
+/// cells are skipped; empty or bad columns yield `0.0`.
+
+pub func col_sum(t: model.Table, col: int) -> float {
+    model.col_sum(t, col)
+}
+
+/// Mean of numeric-looking body cells in one column. No numeric
+/// cells (or a bad column) yields `0.0` — never a divide-by-zero.
+
+pub func col_avg(t: model.Table, col: int) -> float {
+    model.col_avg(t, col)
+}
+
+/// Count of numeric-looking body cells in one column. Bad columns
+/// yield `0`.
+
+pub func col_num_count(t: model.Table, col: int) -> int {
+    model.col_num_count(t, col)
+}
+
+/// Full data as CSV text: headers, every body row, then the footer.
+/// Always complete (paging and truncation never apply); the `… +N more`
+/// note is excluded. Cells export sanitized and untruncated.
+
+pub func to_csv(t: model.Table) -> str {
+    model.to_csv(t)
+}
+
+/// Full data as a JSON array of objects keyed by headers: body rows
+/// only (the footer is a display total). Short rows fill `""`;
+/// cells past the headers are dropped. Sanitized, untruncated.
+
+pub func to_json(t: model.Table) -> str {
+    model.to_json(t)
+}
+
+/// Headers plus every body row, as plain rows. Round-trips with
+/// `from_rows`; the footer stays out (it belongs to display).
+
+pub func to_rows(t: model.Table) -> [[str]] {
+    model.to_rows(t)
+}
+
+/// Shrink column caps until the framed table fits `total` terminal
+/// columns (sides included). Widest column first, floor 3, existing
+/// caps only lowered. Best effort when even the floor doesn't fit.
+
+pub func fit_width(t: model.Table, total: int) -> model.Table {
+    engine.fit_width(t, total)
+}
+
 /// Build from a JSON document: array-of-arrays (cells in order) or
 /// array-of-objects (columns picked in `headers` order, missing keys
 /// render blank). Scalars convert naturally (numbers keep their text,

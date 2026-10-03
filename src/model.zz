@@ -3,6 +3,7 @@
 import std.json
 import std.vec
 
+import text
 import theme
 
 /// A table under construction. Passed by value — re-bind after each call:
@@ -101,6 +102,68 @@ pub func row(t: Table, i: int) -> [str] {
         j = j + 1
     }
     out
+}
+
+// Sum and count of numeric-looking body cells in one column.
+// Non-numeric cells never vote (same rule as auto-alignment).
+
+func col_sum_count(t: Table, col: int) -> [float] {
+    out:[float] = []
+    out = vec.push(out, 0.0)
+    out = vec.push(out, 0.0)
+    if col < 0 {
+        return out
+    }
+    r := 0
+    while r < len(t.rows) {
+        if col < len(t.rows[r]) {
+            s := text.sanitize(t.rows[r][col])
+            if text.is_num_text(s) {
+                out[0] = out[0] + float(s)
+                out[1] = out[1] + 1.0
+            }
+        }
+        r = r + 1
+    }
+    out
+}
+
+/// Sum of numeric-looking body cells in one column. Non-numeric
+/// cells are skipped; empty or bad columns yield `0.0`.
+
+pub func col_sum(t: Table, col: int) -> float {
+    col_sum_count(t, col)[0]
+}
+
+/// Mean of numeric-looking body cells in one column. No numeric
+/// cells (or a bad column) yields `0.0` — never a divide-by-zero.
+
+pub func col_avg(t: Table, col: int) -> float {
+    sc := col_sum_count(t, col)
+    if sc[1] == 0.0 {
+        return 0.0
+    }
+    sc[0] / sc[1]
+}
+
+/// Count of numeric-looking body cells in one column. Bad columns
+/// yield `0`.
+
+pub func col_num_count(t: Table, col: int) -> int {
+    n := 0
+    if col < 0 {
+        return n
+    }
+    r := 0
+    while r < len(t.rows) {
+        if col < len(t.rows[r]) {
+            if text.is_num_text(text.sanitize(t.rows[r][col])) {
+                n = n + 1
+            }
+        }
+        r = r + 1
+    }
+    n
 }
 
 /// Create a table from headers plus all rows at once.
@@ -506,6 +569,116 @@ pub func hide_col(t: Table, col: int) -> Table {
         r = r + 1
     }
     t
+}
+
+// One CSV field: quote when the cell holds a comma or quote, double
+// any embedded quotes. Cells are pre-sanitized, so no newlines occur.
+
+func csv_field(s: str) -> str {
+    has_comma := len(str.split(s, ",")) > 1
+    has_quote := len(str.split(s, "\"")) > 1
+    if has_comma == false && has_quote == false {
+        return s
+    }
+    "\"" + str.replace(s, "\"", "\"\"") + "\""
+}
+
+/// Full data as CSV text: headers, every body row, then the footer.
+/// Always complete (paging and truncation never apply); the `… +N more`
+/// note is a display artifact and is excluded. Cells export sanitized
+/// and untruncated.
+
+pub func to_csv(t: Table) -> str {
+    ncols := col_count(t)
+    lines:[str] = []
+    h:[str] = []
+    i := 0
+    while i < ncols {
+        if i < len(t.headers) {
+            h = vec.push(h, csv_field(text.sanitize(t.headers[i])))
+        } else {
+            h = vec.push(h, "")
+        }
+        i = i + 1
+    }
+    lines = vec.push(lines, vec.join(h, ","))
+    r := 0
+    while r < len(t.rows) {
+        cells:[str] = []
+        i = 0
+        while i < ncols {
+            if i < len(t.rows[r]) {
+                cells = vec.push(cells, csv_field(text.sanitize(t.rows[r][i])))
+            } else {
+                cells = vec.push(cells, "")
+            }
+            i = i + 1
+        }
+        lines = vec.push(lines, vec.join(cells, ","))
+        r = r + 1
+    }
+    if len(t.footer) > 0 {
+        cells:[str] = []
+        i = 0
+        while i < ncols {
+            if i < len(t.footer) {
+                cells = vec.push(cells, csv_field(text.sanitize(t.footer[i])))
+            } else {
+                cells = vec.push(cells, "")
+            }
+            i = i + 1
+        }
+        lines = vec.push(lines, vec.join(cells, ","))
+    }
+    vec.join(lines, "\n") + "\n"
+}
+
+// One JSON string value: escape backslashes first, then quotes.
+// Cells are pre-sanitized, so no control characters occur.
+
+func json_field(s: str) -> str {
+    e := str.replace(s, "\\", "\\\\")
+    e = str.replace(e, "\"", "\\\"")
+    "\"" + e + "\""
+}
+
+/// Full data as a JSON array of objects keyed by headers: body rows
+/// only (the footer is a display total). Short rows fill `""`;
+/// cells past the headers are dropped. Sanitized, untruncated.
+
+pub func to_json(t: Table) -> str {
+    nk := len(t.headers)
+    objs:[str] = []
+    r := 0
+    while r < len(t.rows) {
+        pairs:[str] = []
+        k := 0
+        while k < nk {
+            v := ""
+            if k < len(t.rows[r]) {
+                v = text.sanitize(t.rows[r][k])
+            }
+            pairs = vec.push(pairs, json_field(t.headers[k]) + ": " + json_field(v))
+            k = k + 1
+        }
+        objs = vec.push(objs, "{" + vec.join(pairs, ", ") + "}")
+        r = r + 1
+    }
+    "[" + vec.join(objs, ", ") + "]"
+}
+
+/// Headers plus every body row, as plain rows. Round-trips with
+/// `from_rows`; the footer stays out (it belongs to display).
+
+pub func to_rows(t: Table) -> [[str]] {
+    out:[[str]] = []
+    out = vec.push(out, headers(t))
+    r := 0
+    while r < len(t.rows) {
+        out = vec.push(out, row(t, r))
+        r = r + 1
+    }
+    out
 }
 
 /// Switch border style. Unknown names fall back to "rounded".
