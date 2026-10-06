@@ -223,6 +223,24 @@ pub func from_json(headers: [str], text: str) -> model.Table {
     model.from_json(headers, text)
 }
 
+/// Build from CSV text via `std.csv` (RFC4180: quoted commas, doubled
+/// quotes, custom delimiters). First row is data, not headers — pass
+/// headers explicitly, or `[]` to take them from the first row.
+/// Total: invalid CSV yields a headers-only table, never an error.
+///
+///   table.from_csv(["ID", "NAME"], "1,a\n2,b\n")
+
+pub func from_csv(headers: [str], text: str) -> model.Table {
+    model.from_csv(headers, text)
+}
+
+/// Build from delimited text (`";"`, tabs, pipes) via
+/// `csv.parse_delim`. Same header rules as `from_csv`.
+
+pub func from_csv_delim(headers: [str], text: str, delim: str) -> model.Table {
+    model.from_csv_delim(headers, text, delim)
+}
+
 /// Build from an array of dicts. Values convert with `str()`; every
 /// dict must contain every header (a missing key is a runtime error,
 /// like a short sqlz row). Header order sets column order:

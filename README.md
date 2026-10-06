@@ -185,6 +185,8 @@ table.print(t) // render + println in one call
 - `set_max_width` / `set_col_max_width` — truncation caps (`0` = off).
 - `set_max_rows` / `set_row_offset` — paging (`0` = off / start).
 - `from_json(headers, text)` — JSON array-of-arrays / array-of-objects.
+- `from_csv(headers, text)` / `from_csv_delim(headers, text, delim)` —
+  CSV via `std.csv` (`[]` derives headers from the first row).
 - `render(t)` — string (trailing newline included).
 - `print(t)` — `println(render(t))`.
 - `styles()` — the seven style names.
@@ -250,9 +252,22 @@ headers from the first object's keys). Numbers keep their text,
 booleans print true/false, null and nesting render blank. Total:
 invalid JSON yields a headers-only table, never an error.
 
+## CSV
+
+```zz
+t := table.from_csv(["ID", "NAME"], "1,alice\n2,bob\n")
+t := table.from_csv([], "id,name\n1,a\n")      // headers from first row
+t := table.from_csv_delim(["A", "B"], "1;2\n", ";") // custom delimiter
+```
+
+Parsing rides on `std.csv` (RFC4180: quoted commas, doubled quotes),
+so anything it reads renders. The first row is data — pass headers
+explicitly or `[]` to take them from row one. Total like JSON:
+invalid input yields a headers-only table. Round-trips with `to_csv`.
+
 ## Tests
 
-`zz test` runs 81 checks: golden rounded output, per-column
+`zz test` runs 89 checks: golden rounded output, per-column
 alignment (incl. sticky `set_align_all`), header alignment, border
 toggles across styles, row-offset paging, captions, shape accessors,
 index columns, transpose and hide goldens, footer separator,
@@ -270,4 +285,6 @@ and page stability, transpose goldens incl. ragged input, hide goldens
 incl. footer shift, shape pipeline), plus thirteen v0.5.0 checks
 (aggregates incl. junk-skipping and divide-by-zero, CSV goldens and
 window independence, JSON goldens and escaping, rows round-trip, fit
-shrink/floor/untouched paths).
+shrink/floor/untouched paths), plus eight v0.6.0 checks (CSV goldens,
+derived headers, quoted fields, ragged rows, delimiter variant,
+empty-input empties, CSV round-trip).
