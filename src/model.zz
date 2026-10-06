@@ -1,5 +1,6 @@
 // model.zz — Table struct, builders, setters, and bridges.
 // Field-touching code lives here; renderers live in render.zz.
+import std.csv
 import std.json
 import std.vec
 
@@ -280,6 +281,54 @@ pub func from_json(headers: [str], text: str) -> Table {
         .ok(doc) => fill_json(t, doc)
         .err(_) => t
     }
+}
+
+/// Build from CSV text via `std.csv` (RFC4180: quoted commas, doubled
+/// quotes, custom delimiters). First row is data, not headers — pass
+/// headers explicitly, or `[]` to take them from the first row.
+/// Total: invalid CSV yields a headers-only table, never an error.
+///
+///   table.from_csv(["ID", "NAME"], "1,a\n2,b\n")
+
+pub func from_csv(headers: [str], text: str) -> Table {
+    t := new(headers)
+    if csv.validate(text) == false {
+        return t
+    }
+    fill_csv(t, csv.parse(text))
+}
+
+/// Build from delimited text (`";"`, tabs, pipes) via
+/// `csv.parse_delim`. Same header rules as `from_csv`.
+
+pub func from_csv_delim(headers: [str], text: str, delim: str) -> Table {
+    t := new(headers)
+    if csv.validate(text) == false {
+        return t
+    }
+    fill_csv(t, csv.parse_delim(text, delim))
+}
+
+// Shared body loader: derive headers from the first row when none
+// were given, then append every record. Ragged rows ride along —
+// `add_row` pads short and keeps long, like everywhere else.
+
+func fill_csv(t: Table, rows: [[str]]) -> Table {
+    recs := rows
+    if len(t.headers) == 0 {
+        if len(rows) == 0 {
+            return t
+        }
+        t.headers = rows[0]
+        t = sync_spans(t)
+        recs = []
+        i := 1
+        while i < len(rows) {
+            recs = vec.push(recs, rows[i])
+            i = i + 1
+        }
+    }
+    add_rows(t, recs)
 }
 
 func fill_json(t: Table, doc: json) -> Table {
