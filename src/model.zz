@@ -275,9 +275,9 @@ pub func column<T>(rows: [T], f: func(T) -> str) -> [str] {
 ///
 ///   table.from_json(["ID", "NAME"], "[{\"id\": 1, \"name\": \"a\"}]")
 
-pub func from_json(headers: [str], text: str) -> Table {
+pub func from_json(headers: [str], body: str) -> Table {
     t := new(headers)
-    match json.parse(text) {
+    match json.parse(body) {
         .ok(doc) => fill_json(t, doc)
         .err(_) => t
     }
@@ -290,23 +290,23 @@ pub func from_json(headers: [str], text: str) -> Table {
 ///
 ///   table.from_csv(["ID", "NAME"], "1,a\n2,b\n")
 
-pub func from_csv(headers: [str], text: str) -> Table {
+pub func from_csv(headers: [str], body: str) -> Table {
     t := new(headers)
-    if csv.validate(text) == false {
+    if csv.validate(body) == false {
         return t
     }
-    fill_csv(t, csv.parse(text))
+    fill_csv(t, csv.parse(body))
 }
 
 /// Build from delimited text (`";"`, tabs, pipes) via
 /// `csv.parse_delim`. Same header rules as `from_csv`.
 
-pub func from_csv_delim(headers: [str], text: str, delim: str) -> Table {
+pub func from_csv_delim(headers: [str], body: str, delim: str) -> Table {
     t := new(headers)
-    if csv.validate(text) == false {
+    if csv.validate(body) == false {
         return t
     }
-    fill_csv(t, csv.parse_delim(text, delim))
+    fill_csv(t, csv.parse_delim(body, delim))
 }
 
 // Shared body loader: derive headers from the first row when none

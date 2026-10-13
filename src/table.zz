@@ -219,8 +219,8 @@ pub func fit_width(t: model.Table, total: int) -> model.Table {
 ///
 ///   table.from_json(["ID", "NAME"], "[{\"id\": 1, \"name\": \"a\"}]")
 
-pub func from_json(headers: [str], text: str) -> model.Table {
-    model.from_json(headers, text)
+pub func from_json(headers: [str], body: str) -> model.Table {
+    model.from_json(headers, body)
 }
 
 /// Build from CSV text via `std.csv` (RFC4180: quoted commas, doubled
@@ -230,15 +230,15 @@ pub func from_json(headers: [str], text: str) -> model.Table {
 ///
 ///   table.from_csv(["ID", "NAME"], "1,a\n2,b\n")
 
-pub func from_csv(headers: [str], text: str) -> model.Table {
-    model.from_csv(headers, text)
+pub func from_csv(headers: [str], body: str) -> model.Table {
+    model.from_csv(headers, body)
 }
 
 /// Build from delimited text (`";"`, tabs, pipes) via
 /// `csv.parse_delim`. Same header rules as `from_csv`.
 
-pub func from_csv_delim(headers: [str], text: str, delim: str) -> model.Table {
-    model.from_csv_delim(headers, text, delim)
+pub func from_csv_delim(headers: [str], body: str, delim: str) -> model.Table {
+    model.from_csv_delim(headers, body, delim)
 }
 
 /// Build from an array of dicts. Values convert with `str()`; every
