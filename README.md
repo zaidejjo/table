@@ -1,11 +1,14 @@
 # table
 
-Beautiful rounded CLI tables for ZZ. Pure ZZ, zero dependencies.
+Beautiful rounded CLI tables for ZZ.
 
-```toml
+## Install
+```bash
 zz add table
 ```
 
+
+## Try
 ```zz
 import table
 
@@ -265,26 +268,3 @@ so anything it reads renders. The first row is data — pass headers
 explicitly or `[]` to take them from row one. Total like JSON:
 invalid input yields a headers-only table. Round-trips with `to_csv`.
 
-## Tests
-
-`zz test` runs 89 checks: golden rounded output, per-column
-alignment (incl. sticky `set_align_all`), header alignment, border
-toggles across styles, row-offset paging, captions, shape accessors,
-index columns, transpose and hide goldens, footer separator,
-title, all seven glyph sets, fallback paths, uneven rows, empty
-tables, newline folding, ANSI-safe widths, bulk APIs, row lines,
-padding clamps, five `std.sqlz` bridge checks (struct rows, `|>`
-pipelines, unannotated rows, `column`/`from_cols`, empty results),
-eleven v0.2.0 checks (truncation goldens, per-column caps, colored
-truncation without bleed, markdown/minimal truncation, JSON shapes,
-derived headers, invalid-JSON empties, pipeline fluency), plus
-eighteen v0.3.0 checks (header goldens, frameless/borderless outputs,
-offset windows and page counts, width isolation, caption goldens),
-plus ten v0.4.0 checks (accessors incl. copy isolation, index goldens
-and page stability, transpose goldens incl. ragged input, hide goldens
-incl. footer shift, shape pipeline), plus thirteen v0.5.0 checks
-(aggregates incl. junk-skipping and divide-by-zero, CSV goldens and
-window independence, JSON goldens and escaping, rows round-trip, fit
-shrink/floor/untouched paths), plus eight v0.6.0 checks (CSV goldens,
-derived headers, quoted fields, ragged rows, delimiter variant,
-empty-input empties, CSV round-trip).
